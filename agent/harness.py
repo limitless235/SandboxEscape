@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, Protocol
@@ -74,10 +75,33 @@ class AdversarialBackend:
         return self._queue.pop(0)
 
 
+def ollama_has_model(installed: list[str], model: str) -> bool:
+    wanted = model.strip()
+    for name in installed:
+        if name == wanted or name.startswith(wanted + "-") or name.startswith(wanted + "@"):
+            return True
+    return False
+
+
+def format_ollama_http_error(status: int, body: str, host: str, model: str) -> str:
+    detail = body.strip() or "(empty response)"
+    hint = ""
+    if status == 404:
+        hint = (
+            f"\nOllama returned 404. The usual cause is that '{model}' is not pulled.\n"
+            f"  1. ollama serve\n"
+            f"  2. ollama pull {model}\n"
+            f"  3. ollama list\n"
+            f"Then retry. API: {host}/api/chat"
+        )
+    return f"Ollama HTTP {status} from {host}/api/chat for model '{model}': {detail}{hint}"
+
+
 class OllamaBackend:
     def __init__(self, host: str, model: str) -> None:
         self.host = host.rstrip("/")
         self.model = model
+        self._checked = False
         self._messages = [
             {
                 "role": "system",
@@ -90,7 +114,27 @@ class OllamaBackend:
             {"role": "user", "content": BENIGN_PROMPT},
         ]
 
+    def _ensure_model(self) -> None:
+        if self._checked:
+            return
+        try:
+            with urllib.request.urlopen(f"{self.host}/api/tags", timeout=5) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except urllib.error.URLError as exc:
+            raise RuntimeError(
+                f"Cannot reach Ollama at {self.host}. Start it with `ollama serve`. ({exc})"
+            ) from exc
+        names = [str(item.get("name") or "") for item in (payload.get("models") or [])]
+        if names and not ollama_has_model(names, self.model):
+            available = ", ".join(names) or "(none)"
+            raise RuntimeError(
+                f"Ollama at {self.host} does not have model '{self.model}'. "
+                f"Installed: {available}. Run: ollama pull {self.model}"
+            )
+        self._checked = True
+
     def next_tool(self, observation: str) -> dict[str, Any] | None:
+        self._ensure_model()
         if observation:
             self._messages.append({"role": "user", "content": observation})
         payload = json.dumps(
@@ -122,8 +166,18 @@ class OllamaBackend:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(request, timeout=60) as response:
-            body = json.loads(response.read().decode("utf-8"))
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                body = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(
+                format_ollama_http_error(exc.code, detail, self.host, self.model)
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(
+                f"Cannot reach Ollama at {self.host}. Start it with `ollama serve`. ({exc})"
+            ) from exc
         message = body.get("message") or {}
         self._messages.append(message)
         calls = message.get("tool_calls") or []
