@@ -102,16 +102,41 @@ def format_ollama_http_error(status: int, body: str, host: str, model: str) -> s
     return f"Ollama HTTP {status} from {host}/api/chat for model '{model}': {detail}{hint}"
 
 
+def _coerce_tool_args(raw_args: Any, tool: str) -> dict[str, Any]:
+    if raw_args is None or raw_args == "":
+        return {}
+    if isinstance(raw_args, str):
+        try:
+            parsed = json.loads(raw_args)
+        except json.JSONDecodeError:
+            stripped = raw_args.strip()
+            if tool == "query_local_sqlite":
+                return {"query": stripped}
+            if tool == "run_local_python":
+                return {"code": stripped}
+            if tool == "read_file":
+                return {"path": stripped}
+            return {"value": stripped}
+        raw_args = parsed
+    if not isinstance(raw_args, dict):
+        return {}
+    return dict(raw_args)
+
+
 def parse_ollama_tool_calls(message: dict[str, Any]) -> list[dict[str, Any]]:
     calls: list[dict[str, Any]] = []
     for raw in message.get("tool_calls") or []:
         function = raw.get("function") or {}
-        args = function.get("arguments") or {}
-        if isinstance(args, str):
-            args = json.loads(args or "{}")
-        name = function.get("name")
+        name = function.get("name") or raw.get("name")
+        args = (
+            function.get("arguments")
+            or function.get("parameters")
+            or raw.get("arguments")
+            or raw.get("parameters")
+            or {}
+        )
         if name:
-            calls.append({"tool": name, "args": dict(args)})
+            calls.append({"tool": name, "args": _coerce_tool_args(args, str(name))})
     return calls
 
 
@@ -341,6 +366,7 @@ class AgentHarness:
                 {
                     "tool": step["tool"],
                     "policy": "allow" if step["decision"].allow else "deny",
+                    "reason": step["decision"].reason,
                     "result": step["result"],
                 },
                 default=str,

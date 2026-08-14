@@ -117,10 +117,18 @@ def test_denial_records_include_reason() -> None:
     ]
 
 
+def test_sqlite_missing_query_denied(tmp_path: Path) -> None:
+    policy = ToolPolicy(workspace=tmp_path)
+    decision = policy.decide("query_local_sqlite", {})
+    assert not decision.allow
+    assert "query argument is required" in decision.reason
+
+
 def test_sqlite_non_select_denied(tmp_path: Path) -> None:
     policy = ToolPolicy(workspace=tmp_path)
     decision = policy.decide("query_local_sqlite", {"query": "DELETE FROM items"})
     assert not decision.allow
+    assert "only SELECT" in decision.reason
 
 
 def test_audit_redacts_secret_keys(tmp_path: Path) -> None:

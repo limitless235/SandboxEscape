@@ -174,8 +174,16 @@ class ToolPolicy:
 
         if tool == "query_local_sqlite":
             query = str(args.get("query", "")).strip()
+            if not query:
+                return PolicyDecision(
+                    allow=False,
+                    reason="query argument is required; example: SELECT name, qty FROM items",
+                    control="tool-sandbox-policy",
+                    tool=tool,
+                    target=target,
+                )
             upper = query.upper()
-            if not query or upper.split(None, 1)[0] != "SELECT":
+            if upper.split(None, 1)[0] != "SELECT":
                 return PolicyDecision(
                     allow=False,
                     reason="only SELECT queries are allowed",
