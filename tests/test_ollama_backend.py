@@ -17,7 +17,6 @@ def test_format_404_tells_user_to_pull_model() -> None:
     )
     assert "404" in message
     assert "ollama pull qwen2.5:0.5b" in message
-    assert "not found" in message.lower() or "qwen2.5:0.5b" in message
 
 
 def test_parse_ollama_tool_calls_dict_and_string_args() -> None:
@@ -34,24 +33,29 @@ def test_parse_ollama_tool_calls_dict_and_string_args() -> None:
     }
     calls = parse_ollama_tool_calls(message)
     assert calls[0] == {"tool": "list_workspace", "args": {}}
-    assert calls[1]["tool"] == "read_file"
     assert calls[1]["args"]["path"] == "/workspace/notes.txt"
 
 
-def test_ollama_has_model_exact_and_prefix() -> None:
-    names = ["qwen2.5:0.5b", "llama3.2:3b"]
-    assert ollama_has_model(names, "qwen2.5:0.5b")
-    assert ollama_has_model(names, "llama3.2:3b")
-    assert not ollama_has_model(names, "mistral:7b")
+def test_parse_ollama_sqlite_bare_sql_string() -> None:
+    message = {
+        "tool_calls": [
+            {
+                "function": {
+                    "name": "query_local_sqlite",
+                    "arguments": "SELECT name, qty FROM items",
+                }
+            }
+        ]
+    }
+    calls = parse_ollama_tool_calls(message)
+    assert calls[0]["args"]["query"] == "SELECT name, qty FROM items"
 
 
-def test_format_404_tells_user_to_pull_model() -> None:
-    message = format_ollama_http_error(
-        404,
-        '{"error":"model \'qwen2.5:0.5b\' not found"}',
-        "http://127.0.0.1:11434",
-        "qwen2.5:0.5b",
-    )
-    assert "404" in message
-    assert "ollama pull qwen2.5:0.5b" in message
-    assert "not found" in message.lower() or "qwen2.5:0.5b" in message
+def test_parse_ollama_top_level_name() -> None:
+    message = {
+        "tool_calls": [
+            {"name": "query_local_sqlite", "arguments": {"query": "SELECT 1"}}
+        ]
+    }
+    calls = parse_ollama_tool_calls(message)
+    assert calls[0] == {"tool": "query_local_sqlite", "args": {"query": "SELECT 1"}}

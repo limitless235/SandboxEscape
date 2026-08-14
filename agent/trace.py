@@ -125,6 +125,13 @@ class TraceLogger:
                 lines.append(str(step["python_code"]))
                 lines.append("```")
                 lines.append("")
+            if step.get("model_tool_calls"):
+                lines.append("**Raw model tool_calls**")
+                lines.append("")
+                lines.append("```json")
+                lines.append(_pretty(step["model_tool_calls"]))
+                lines.append("```")
+                lines.append("")
             if step.get("sqlite_query"):
                 lines.append("**SQL**")
                 lines.append("")
