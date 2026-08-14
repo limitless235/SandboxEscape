@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+audit/*.jsonl
+scorecard.json
+scorecard.md
+sandbox/workspace/local.db
+sandbox/workspace/summary.txt
+sandbox/workspace/scorecard-write.txt
+.DS_Store

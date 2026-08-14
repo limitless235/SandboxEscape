@@ -1,0 +1,11 @@
+# Fault injection: allow unrestricted subprocess in the agent policy.
+# This overlay is policy-only; it is not a Compose file.
+
+allow_unrestricted_subprocess: true
+allowed_tools:
+  - read_file
+  - write_file
+  - list_workspace
+  - run_local_python
+  - query_local_sqlite
+  - run_shell

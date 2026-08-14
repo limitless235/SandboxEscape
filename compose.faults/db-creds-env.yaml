@@ -1,0 +1,9 @@
+# Fault injection: place dummy DB credentials in the sandbox environment.
+
+services:
+  sandbox:
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      POSTGRES_PASSWORD: synthetic-only-not-a-secret
+      PROD_DB_HOST: prod-db

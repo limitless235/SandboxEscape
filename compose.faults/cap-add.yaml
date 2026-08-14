@@ -1,0 +1,6 @@
+# Fault injection: add an unnecessary capability.
+
+services:
+  sandbox:
+    cap_add:
+      - NET_RAW

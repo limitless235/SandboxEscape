@@ -1,0 +1,4 @@
+A tiny workspace used by the benign agent task.
+
+This file is synthetic lab material. It contains no secrets and no
+production data. The agent may summarize it and write a sibling file.

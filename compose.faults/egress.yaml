@@ -1,0 +1,12 @@
+# Fault injection: allow outbound internet from the sandbox.
+# Adds a non-internal network so the sandbox receives a default gateway.
+
+services:
+  sandbox:
+    networks:
+      - sandbox_net
+      - egress_net
+
+networks:
+  egress_net:
+    internal: false

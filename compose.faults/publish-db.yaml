@@ -1,0 +1,6 @@
+# Fault injection: publish the dummy production database to the host.
+
+services:
+  prod-db:
+    ports:
+      - "127.0.0.1:15432:5432"

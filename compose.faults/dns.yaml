@@ -1,0 +1,5 @@
+# Fault injection: restore Docker's default DNS forwarding.
+
+services:
+  sandbox:
+    dns: []

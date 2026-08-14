@@ -1,0 +1,7 @@
+# Fault injection: mount a sensitive host path into the sandbox.
+
+services:
+  sandbox:
+    volumes:
+      - sandbox-workspace:/workspace
+      - /etc:/host-etc:ro
