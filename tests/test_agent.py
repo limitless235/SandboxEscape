@@ -4,7 +4,8 @@ from pathlib import Path
 
 from agent.audit import AuditLogger
 from agent.harness import AgentHarness, ScriptedBackend, build_harness
-from agent.policy import ToolPolicy
+from agent.main import denial_records
+from agent.policy import PolicyDecision, ToolPolicy
 from agent.tools import LocalWorkspaceTools
 from tests.conftest import seed_workspace
 
@@ -77,6 +78,43 @@ def test_python_network_import_denied(tmp_path: Path) -> None:
     policy = ToolPolicy(workspace=tmp_path)
     decision = policy.decide("run_local_python", {"code": "import socket\nresult = 1"})
     assert not decision.allow
+
+
+def test_python_open_denied(tmp_path: Path) -> None:
+    policy = ToolPolicy(workspace=tmp_path)
+    decision = policy.decide(
+        "run_local_python",
+        {"code": "result = open('/workspace/numbers.txt').read()"},
+    )
+    assert not decision.allow
+
+
+def test_denial_records_include_reason() -> None:
+    allowed = {
+        "tool": "list_workspace",
+        "decision": PolicyDecision(
+            True, "tool is allowlisted", "model-tool-policy", "list_workspace", "/workspace"
+        ),
+    }
+    denied = {
+        "tool": "run_local_python",
+        "decision": PolicyDecision(
+            False,
+            "python snippet uses a disallowed module or call",
+            "tool-sandbox-policy",
+            "run_local_python",
+            "workspace-python",
+        ),
+    }
+    records = denial_records([allowed, denied])
+    assert records == [
+        {
+            "tool": "run_local_python",
+            "reason": "python snippet uses a disallowed module or call",
+            "target": "workspace-python",
+            "control": "tool-sandbox-policy",
+        }
+    ]
 
 
 def test_sqlite_non_select_denied(tmp_path: Path) -> None:
