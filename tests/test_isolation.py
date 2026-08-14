@@ -33,6 +33,7 @@ def test_locked_invariants_all_pass() -> None:
         "Host filesystem inaccessible",
         "Sandbox-local SQLite",
         "Workspace read/write",
+        "Chained misconfiguration path",
     ]
     failed = [name for name in required if scorecard[name] != "PASS"]
     assert failed == []

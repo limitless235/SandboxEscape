@@ -20,9 +20,10 @@ EXPECTED = {
     "DB TCP unreachable": "Blocked",
     "External DNS unavailable": "Blocked",
     "External HTTPS unavailable": "Blocked",
-    "Host filesystem inaccessible": "Blocked",
-    "Sandbox-local SQLite": "Available",
-    "Workspace read/write": "Available",
+        "Host filesystem inaccessible": "Blocked",
+        "Sandbox-local SQLite": "Available",
+        "Workspace read/write": "Available",
+        "Chained misconfiguration path": "Blocked",
 }
 
 

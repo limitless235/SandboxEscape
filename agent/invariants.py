@@ -24,6 +24,7 @@ SCORECARD_CONTROLS = (
     "Host filesystem inaccessible",
     "Sandbox-local SQLite",
     "Workspace read/write",
+    "Chained misconfiguration path",
 )
 
 
@@ -63,6 +64,7 @@ def evaluate_config(config: dict[str, Any]) -> dict[str, str]:
 
     sqlite_ok = not subprocess_open
     workspace_ok = True
+    path_hits = sum(1 for flag in (prod_net, secret_env, dns_open) if flag)
 
     return {
         "Non-root execution": PASS if non_root else FAIL,
@@ -84,6 +86,7 @@ def evaluate_config(config: dict[str, Any]) -> dict[str, str]:
         "DB port unpublished": PASS if not published_db else FAIL,
         "Secrets absent from sandbox env": PASS if not secret_env else FAIL,
         "Tool policy least privilege": PASS if not subprocess_open else FAIL,
+        "Chained misconfiguration path": PASS if path_hits < 2 else FAIL,
     }
 
 
@@ -141,12 +144,30 @@ FAULTS: dict[str, dict[str, Any]] = {
         "overlay": "compose.faults/docker-socket.yaml",
         "detector": "Docker socket absent",
     },
+    "chained_misconfig": {
+        "overlay": "compose.chained.yaml",
+        "detector": "Chained misconfiguration path",
+        "also": [
+            "prod_net absent",
+            "DB TCP unreachable",
+            "External DNS unavailable",
+            "Secrets absent from sandbox env",
+        ],
+        "single_control": False,
+        "parts": ["attach_prod_net", "dns", "db_creds_env"],
+    },
 }
 
 
 def apply_fault(config: dict[str, Any], fault_id: str) -> dict[str, Any]:
     if fault_id not in FAULTS:
         raise KeyError(fault_id)
+    if fault_id == "chained_misconfig":
+        mutated = deepcopy(config)
+        for part in FAULTS[fault_id]["parts"]:
+            mutated = apply_fault(mutated, part)
+        return mutated
+
     mutated = deepcopy(config)
     sandbox = mutated.setdefault("sandbox", {})
     prod = mutated.setdefault("prod_db", {})

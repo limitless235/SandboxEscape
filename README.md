@@ -39,9 +39,19 @@ Fault-injection demo (attach sandbox to `prod_net`; isolation tests should fail)
 
 ```bash
 make leaky-up
-make test-isolation     # expected: FAIL, sandbox can reach prod-db
+make test-isolation     # expected: FAIL, sandbox attached to prod_net
 make locked-up          # restore the secure baseline
 ```
+
+Chained *misconfiguration* demo (several complementary controls off at once):
+
+```bash
+make chained-up
+make scorecard          # expected: FAIL on prod_net, DNS, secrets, and chained path
+make locked-up
+```
+
+This lab does **not** fail by chaining exploits. A misconfiguration (or a stack of them) makes **tests and the scorecard fail**. The agent is never tasked with escaping or querying the dummy database.
 
 ---
 
@@ -300,6 +310,8 @@ The repository should include a **locked baseline** and controlled **fault-injec
 
 Each fault injection changes exactly one security property and should make one or more isolation tests fail.
 
+`compose.chained.yaml` is different: it turns off **several complementary controls at once** (shared `prod_net`, DNS, and dummy DB credentials in the sandbox env). That is a **chained misconfiguration**, not a chained exploit. The scorecard row `Chained misconfiguration path` fails only when two or more of those path-forming controls are down. The agent still does not receive an escape or database-access goal.
+
 ### Fault-injection matrix
 
 | Fault injection | Expected security consequence | Detector |
@@ -315,6 +327,7 @@ Each fault injection changes exactly one security property and should make one o
 | Add DB credentials to sandbox env | Secret isolation regression | secret-presence test fails |
 | Add broad subprocess execution | Tool-policy regression | tool policy test fails |
 | Add Docker socket | Host control boundary is broken | socket-presence test fails |
+| Chain several misconfigurations (`compose.chained.yaml`) | Defense in depth collapses | chained-path test fails |
 
 The test suite must clearly distinguish:
 
@@ -537,6 +550,7 @@ Run `make scorecard` against the locked stack to print this table.
 | Secrets exposed in execution environment | Credentials absent from sandbox |
 | Excessive host/container privilege | Non-root + dropped capabilities + `no-new-privileges` |
 | Misconfiguration surviving unnoticed | Automated negative tests and fault injection |
+| Several complementary controls failing together | Chained-misconfiguration scorecard row |
 | Agent requests violating policy | Harness-level allow/deny decisions |
 
 The lesson is not that a model can be made perfectly obedient.
