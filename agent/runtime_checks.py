@@ -203,6 +203,8 @@ def live_scorecard() -> dict[str, str]:
     db_tcp = (not prod_net) and db_tcp_probe
     https = not _tcp_reaches("1.1.1.1", 443)
     dns = not _dns_resolves("example.invalid")
+    dns_open = not dns
+    path_hits = sum(1 for flag in (prod_net, secret_env, dns_open) if flag)
 
     scorecard = {
         "Non-root execution": PASS if non_root else FAIL,
@@ -219,6 +221,7 @@ def live_scorecard() -> dict[str, str]:
         "Workspace read/write": PASS if workspace else FAIL,
         "DB port unpublished": PASS if not secret_env else PASS,
         "Secrets absent from sandbox env": PASS if not secret_env else FAIL,
+        "Chained misconfiguration path": PASS if path_hits < 2 else FAIL,
         "container_running": PASS if state.get("Running") else FAIL,
     }
     for control in SCORECARD_CONTROLS:

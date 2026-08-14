@@ -1,0 +1,15 @@
+# Chained misconfiguration profile (configuration only).
+profile: chained
+fault: chained_misconfig
+inherits: locked
+parts:
+  - attach_prod_net
+  - dns
+  - db_creds_env
+detector: chained_misconfiguration_path
+expected_scorecard:
+  prod_net absent: FAIL
+  DB TCP unreachable: FAIL
+  External DNS unavailable: FAIL
+  Secrets absent from sandbox env: FAIL
+  Chained misconfiguration path: FAIL

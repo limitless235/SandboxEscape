@@ -3,7 +3,7 @@ COMPOSE ?= docker compose
 PYTEST ?= $(PYTHON) -m pytest
 
 .PHONY: test test-unit test-isolation scorecard agent-benign agent-adversarial \
-	up down locked-up leaky-up build
+	up down locked-up leaky-up chained-up build
 
 test: test-unit
 
@@ -33,6 +33,9 @@ up locked-up:
 
 leaky-up:
 	$(COMPOSE) -f compose.yaml -f compose.leaky.yaml up --build -d
+
+chained-up:
+	$(COMPOSE) -f compose.yaml -f compose.chained.yaml up --build -d
 
 down:
 	$(COMPOSE) down -v
