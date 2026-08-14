@@ -8,6 +8,14 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from agent.audit import _sanitize
+from agent.explain import (
+    CONTROL_PLAIN,
+    explain_step,
+    monitoring_markdown,
+    monitoring_summary,
+    plane_for,
+    run_briefing_markdown,
+)
 from agent.policy import PolicyDecision
 
 _RESULT_LIMIT = 4000
@@ -47,6 +55,13 @@ class TraceLogger:
         backend: str = "",
     ) -> dict[str, Any]:
         previous = self.steps[-1]["tool"] if self.steps else None
+        meaning = explain_step(
+            tool=tool,
+            args=args,
+            policy="allow" if decision.allow else "deny",
+            reason=decision.reason,
+            target=decision.target,
+        )
         event = _sanitize(
             {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -63,6 +78,8 @@ class TraceLogger:
                 "policy": "allow" if decision.allow else "deny",
                 "reason": decision.reason,
                 "control": decision.control,
+                "plane": plane_for(tool, args),
+                "meaning": meaning,
                 "outcome": outcome,
                 "result": _clip(result),
                 "backend": backend,
@@ -86,14 +103,20 @@ class TraceLogger:
 
     def render_markdown(self) -> str:
         if not self.steps:
-            return "# Agent trace\n\nNo steps recorded.\n"
+            return "# Agent trace\n\nNo steps recorded.\n\n" + run_briefing_markdown()
         backend = str(self.steps[0].get("backend") or "unknown")
+        summary = monitoring_summary(self.steps)
         lines = [
             "# Agent trace",
             "",
             f"Backend: `{backend}`",
-            f"Steps: {len(self.steps)}",
+            (
+                f"Steps: {len(self.steps)} · "
+                f"Allowed: {summary['allowed']} · "
+                f"Denied: {summary['denied']}"
+            ),
             "",
+            run_briefing_markdown(),
             "## Chain",
             "",
             self._chain_line(),
@@ -108,6 +131,19 @@ class TraceLogger:
                     "",
                 ]
             )
+            if step.get("meaning"):
+                lines.append(f"**What this means:** {step['meaning']}")
+                lines.append("")
+            if step.get("plane"):
+                lines.append(f"**Plane:** {step['plane']}")
+                lines.append("")
+            if step.get("control"):
+                plain = CONTROL_PLAIN.get(str(step["control"]), "")
+                control_line = f"**Control:** `{step['control']}`"
+                if plain:
+                    control_line += f" — {plain}"
+                lines.append(control_line)
+                lines.append("")
             if step.get("chained_from"):
                 lines.append(f"Chained from `{step['chained_from']}` (previous tool result was fed back).")
                 lines.append("")
@@ -157,7 +193,11 @@ class TraceLogger:
             lines.append(_pretty(step.get("result")))
             lines.append("```")
             lines.append("")
+        lines.append(monitoring_markdown(summary))
         return "\n".join(lines)
+
+    def chain_line(self) -> str:
+        return self._chain_line()
 
     def _chain_line(self) -> str:
         parts: list[str] = []
