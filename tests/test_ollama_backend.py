@@ -84,6 +84,23 @@ def test_parse_ollama_top_level_name() -> None:
     assert calls[0] == {"tool": "query_local_sqlite", "args": {"query": "SELECT 1"}}
 
 
+def test_parse_keeps_sql_query_on_python_tool() -> None:
+    message = {
+        "tool_calls": [
+            {
+                "function": {
+                    "name": "run_local_python",
+                    "arguments": {"query": "SELECT name, qty FROM items"},
+                }
+            }
+        ]
+    }
+    calls = parse_ollama_tool_calls(message)
+    assert calls[0]["tool"] == "run_local_python"
+    assert calls[0]["args"]["query"] == "SELECT name, qty FROM items"
+    assert "code" not in calls[0]["args"]
+
+
 def test_ollama_drains_batched_tool_calls(monkeypatch) -> None:
     chat_calls = {"count": 0}
 

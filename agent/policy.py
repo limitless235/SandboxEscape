@@ -56,6 +56,24 @@ def python_deny_reason(code: str) -> str | None:
     return None
 
 
+def python_args_deny_reason(args: Mapping[str, Any]) -> str | None:
+    code = str(args.get("code") or "").strip()
+    query = str(args.get("query") or "").strip()
+    if not code:
+        if query:
+            return (
+                "run_local_python requires code, not query. "
+                "Call query_local_sqlite with query: SELECT name, qty FROM items. "
+                "To sum numbers, read_file /workspace/numbers.txt, then "
+                "code: nums = [1, 2, 3, 4, 5]; result = sum(nums)"
+            )
+        return (
+            "code argument is required; example: "
+            "nums = [1, 2, 3, 4, 5]; result = sum(nums)"
+        )
+    return python_deny_reason(code)
+
+
 @dataclass(frozen=True)
 class PolicyDecision:
     allow: bool
@@ -174,7 +192,7 @@ class ToolPolicy:
                 )
 
         if tool == "run_local_python":
-            deny_reason = python_deny_reason(str(args.get("code", "")))
+            deny_reason = python_args_deny_reason(args)
             if deny_reason:
                 return PolicyDecision(
                     allow=False,
