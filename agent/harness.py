@@ -97,11 +97,88 @@ def format_ollama_http_error(status: int, body: str, host: str, model: str) -> s
     return f"Ollama HTTP {status} from {host}/api/chat for model '{model}': {detail}{hint}"
 
 
+def parse_ollama_tool_calls(message: dict[str, Any]) -> list[dict[str, Any]]:
+    calls: list[dict[str, Any]] = []
+    for raw in message.get("tool_calls") or []:
+        function = raw.get("function") or {}
+        args = function.get("arguments") or {}
+        if isinstance(args, str):
+            args = json.loads(args or "{}")
+        name = function.get("name")
+        if name:
+            calls.append({"tool": name, "args": dict(args)})
+    return calls
+
+
+OLLAMA_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "list_workspace",
+            "description": "List files in the /workspace directory.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_file",
+            "description": "Read a UTF-8 text file under /workspace.",
+            "parameters": {
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "write_file",
+            "description": "Write a UTF-8 text file under /workspace.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "content": {"type": "string"},
+                },
+                "required": ["path", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_local_python",
+            "description": "Run a short Python snippet. Set result = ...",
+            "parameters": {
+                "type": "object",
+                "properties": {"code": {"type": "string"}},
+                "required": ["code"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_local_sqlite",
+            "description": "Run a SELECT on /workspace/local.db.",
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+        },
+    },
+]
+
+
 class OllamaBackend:
     def __init__(self, host: str, model: str) -> None:
         self.host = host.rstrip("/")
         self.model = model
         self._checked = False
+        self._sent_initial_prompt = False
         self._messages = [
             {
                 "role": "system",
@@ -135,29 +212,16 @@ class OllamaBackend:
 
     def next_tool(self, observation: str) -> dict[str, Any] | None:
         self._ensure_model()
-        if observation:
-            self._messages.append({"role": "user", "content": observation})
+        if not self._sent_initial_prompt:
+            self._sent_initial_prompt = True
+        elif observation:
+            self._messages.append({"role": "tool", "content": observation})
         payload = json.dumps(
             {
                 "model": self.model,
                 "messages": self._messages,
                 "stream": False,
-                "tools": [
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": name,
-                            "parameters": {"type": "object"},
-                        },
-                    }
-                    for name in (
-                        "read_file",
-                        "write_file",
-                        "list_workspace",
-                        "run_local_python",
-                        "query_local_sqlite",
-                    )
-                ]
+                "tools": OLLAMA_TOOLS,
             }
         ).encode("utf-8")
         request = urllib.request.Request(
@@ -180,14 +244,10 @@ class OllamaBackend:
             ) from exc
         message = body.get("message") or {}
         self._messages.append(message)
-        calls = message.get("tool_calls") or []
+        calls = parse_ollama_tool_calls(message)
         if not calls:
             return None
-        call = calls[0].get("function") or {}
-        args = call.get("arguments") or {}
-        if isinstance(args, str):
-            args = json.loads(args or "{}")
-        return {"tool": call.get("name"), "args": args}
+        return calls[0]
 
 
 class AgentHarness:
