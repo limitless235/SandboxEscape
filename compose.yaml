@@ -1,0 +1,101 @@
+name: defensive-sandbox-lab
+
+services:
+  prod-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: synthetic-only-not-a-secret
+      POSTGRES_DB: production
+    volumes:
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - prod_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d production"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  sandbox:
+    build:
+      context: ./sandbox
+    read_only: true
+    user: "65532:65532"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m,mode=1777,uid=65532,gid=65532
+    volumes:
+      - sandbox-workspace:/workspace
+    dns:
+      - "127.0.0.1"
+    networks:
+      - sandbox_net
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: "0.50"
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2)",
+        ]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  agent:
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
+    environment:
+      SANDBOX_URL: http://sandbox:8080
+      AGENT_BACKEND: ${AGENT_BACKEND:-scripted}
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://ollama:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:0.5b}
+      SANDBOX_PROFILE: locked
+      AUDIT_LOG: /app/audit/events.jsonl
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - agent-audit:/app/audit
+    networks:
+      - control_net
+      - sandbox_net
+    command: ["python3", "-c", "import time; time.sleep(10**9)"]
+    depends_on:
+      sandbox:
+        condition: service_healthy
+    restart: unless-stopped
+
+  ollama:
+    profiles: ["llm"]
+    image: ollama/ollama:latest
+    volumes:
+      - ollama-data:/root/.ollama
+    networks:
+      - control_net
+    restart: unless-stopped
+
+networks:
+  prod_net:
+    internal: true
+  sandbox_net:
+    internal: true
+  control_net:
+    internal: true
+
+volumes:
+  sandbox-workspace:
+  agent-audit:
+  ollama-data:

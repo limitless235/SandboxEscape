@@ -1,0 +1,8 @@
+# Fault injection: attach the sandbox to prod_net.
+# One control change. Detectors should report DB reachability as FAIL.
+
+services:
+  sandbox:
+    networks:
+      - sandbox_net
+      - prod_net

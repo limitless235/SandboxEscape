@@ -1,0 +1,5 @@
+# Fault injection: make the sandbox root filesystem writable.
+
+services:
+  sandbox:
+    read_only: false

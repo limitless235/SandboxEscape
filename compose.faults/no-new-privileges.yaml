@@ -1,0 +1,5 @@
+# Fault injection: drop no-new-privileges.
+
+services:
+  sandbox:
+    security_opt: []

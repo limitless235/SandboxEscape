@@ -1,0 +1,13 @@
+# Demo overlay: attach the sandbox to prod_net.
+# This is configuration fault injection, not an exploit recipe.
+profile: leaky
+fault: attach_prod_net
+inherits: locked
+sandbox:
+  networks:
+    - sandbox_net
+    - prod_net
+detector: prod_net_absent
+expected_scorecard:
+  prod_net absent: FAIL
+  DB TCP unreachable: FAIL
