@@ -180,7 +180,11 @@ OLLAMA_TOOLS = [
         "type": "function",
         "function": {
             "name": "run_local_python",
-            "description": "Run a short Python snippet. Set result = ...",
+            "description": (
+                "Run a short Python snippet. Set result = .... "
+                "Do not use open() or imports. Inline values already obtained from read_file, "
+                "e.g. nums = [1, 2, 3, 4, 5]; result = sum(nums)."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {"code": {"type": "string"}},
@@ -209,6 +213,7 @@ class OllamaBackend:
         self.model = model
         self._checked = False
         self._sent_initial_prompt = False
+        self._pending: list[dict[str, Any]] = []
         self.last_turn: dict[str, Any] = {}
         self._messages = [
             {
@@ -243,6 +248,18 @@ class OllamaBackend:
 
     def next_tool(self, observation: str) -> dict[str, Any] | None:
         self._ensure_model()
+        if self._pending:
+            if observation:
+                self._messages.append({"role": "tool", "content": observation})
+            nxt = self._pending.pop(0)
+            remaining = len(self._pending)
+            self.last_turn = {
+                "content": "",
+                "tool_calls": [nxt],
+                "queued": True,
+                "queued_remaining": remaining,
+            }
+            return nxt
         if not self._sent_initial_prompt:
             self._sent_initial_prompt = True
         elif observation:
@@ -276,13 +293,18 @@ class OllamaBackend:
         message = body.get("message") or {}
         self._messages.append(message)
         calls = parse_ollama_tool_calls(message)
+        if not calls:
+            self.last_turn = {"content": message.get("content") or "", "tool_calls": []}
+            return None
+        first, *rest = calls
+        self._pending = rest
         self.last_turn = {
             "content": message.get("content") or "",
             "tool_calls": calls,
+            "queued": False,
+            "batch_size": len(calls),
         }
-        if not calls:
-            return None
-        return calls[0]
+        return first
 
 
 class AgentHarness:

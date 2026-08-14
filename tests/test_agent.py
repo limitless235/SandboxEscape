@@ -6,7 +6,7 @@ from agent.audit import AuditLogger
 from agent.harness import AgentHarness, ScriptedBackend, build_harness
 from agent.main import denial_records
 from agent.policy import PolicyDecision, ToolPolicy
-from agent.tools import LocalWorkspaceTools
+from agent.tools import LocalWorkspaceTools, ToolError
 from tests.conftest import seed_workspace
 
 
@@ -78,6 +78,7 @@ def test_python_network_import_denied(tmp_path: Path) -> None:
     policy = ToolPolicy(workspace=tmp_path)
     decision = policy.decide("run_local_python", {"code": "import socket\nresult = 1"})
     assert not decision.allow
+    assert "disallowed module or call" in decision.reason
 
 
 def test_python_open_denied(tmp_path: Path) -> None:
@@ -87,6 +88,18 @@ def test_python_open_denied(tmp_path: Path) -> None:
         {"code": "result = open('/workspace/numbers.txt').read()"},
     )
     assert not decision.allow
+    assert "open() is not allowed" in decision.reason
+    assert "nums = [1, 2, 3, 4, 5]" in decision.reason
+    tools = LocalWorkspaceTools(tmp_path)
+    try:
+        tools.execute(
+            "run_local_python",
+            {"code": "result = open('/workspace/numbers.txt').read()"},
+        )
+    except ToolError as exc:
+        assert "open() is not allowed" in str(exc)
+    else:
+        raise AssertionError("open() must be refused by the tool layer too")
 
 
 def test_denial_records_include_reason() -> None:

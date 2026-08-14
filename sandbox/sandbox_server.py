@@ -81,13 +81,26 @@ _PYTHON_DENY_MARKERS = (
 )
 
 
+def python_deny_reason(code: str) -> str | None:
+    lowered = code.lower()
+    if "open(" in lowered:
+        return (
+            "open() is not allowed in run_local_python. "
+            "Use read_file first, then inline the values, e.g. "
+            "nums = [1, 2, 3, 4, 5]; result = sum(nums)"
+        )
+    for marker in _PYTHON_DENY_MARKERS:
+        if marker in lowered:
+            return "python snippet uses a disallowed module or call"
+    return None
+
+
 def run_local_python(code: str) -> str:
     if not isinstance(code, str) or not code.strip():
         raise ValueError("code is required")
-    lowered = code.lower()
-    for marker in _PYTHON_DENY_MARKERS:
-        if marker in lowered:
-            raise ValueError("python snippet uses a disallowed module or call")
+    deny_reason = python_deny_reason(code)
+    if deny_reason:
+        raise ValueError(deny_reason)
     namespace: dict[str, object] = {}
     exec(  # noqa: S102
         code,
