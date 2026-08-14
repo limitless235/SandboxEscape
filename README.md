@@ -20,6 +20,8 @@ The central security principle is:
 
 The purpose of this repository is to verify containment properties empirically. The lab should be able to demonstrate both **PASS** and **FAIL** states without reproducing a real incident or encoding a real-world escape exploit.
 
+**In-depth architecture, container security, and how this lab relates to public eval-sandbox incidents:** [docs/LAB_EXPLAINED.md](docs/LAB_EXPLAINED.md).
+
 ## Quick start
 
 ```bash
@@ -581,6 +583,8 @@ Run `make scorecard` against the locked stack to print this table.
 The lesson is not that a model can be made perfectly obedient.
 
 The lesson is that **containment must remain effective when the model is not obedient**.
+
+A longer mapping of public eval-sandbox incident *classes* (OpenAI/Hugging Face evaluation isolation; Kimi-style egress misconfiguration) onto this repo’s planes, Compose overlays, and traces is in [docs/LAB_EXPLAINED.md](docs/LAB_EXPLAINED.md). That document does not reconstruct attack chains.
 
 ---
 
