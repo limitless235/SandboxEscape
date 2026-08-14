@@ -6,6 +6,7 @@ __pycache__/
 .coverage
 htmlcov/
 audit/*.jsonl
+audit/*.md
 scorecard.json
 scorecard.md
 sandbox/workspace/local.db

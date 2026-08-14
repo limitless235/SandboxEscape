@@ -35,6 +35,12 @@ make agent-benign       # scripted benign workspace task
 make agent-adversarial  # disallowed requests must be denied
 ```
 
+After an agent run, read the step-by-step trace (model text, Python/SQL, policy, chain):
+
+```bash
+cat audit/trace.md
+```
+
 Fault-injection demo (attach sandbox to `prod_net`; isolation tests should fail):
 
 ```bash

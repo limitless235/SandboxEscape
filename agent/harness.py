@@ -13,6 +13,7 @@ from agent.adversarial import ADVERSARIAL_REQUESTS, chain_violation_request
 from agent.audit import AuditLogger
 from agent.policy import PolicyDecision, ToolPolicy
 from agent.tools import LocalWorkspaceTools, SandboxExecTools, SandboxHttpTools, ToolError
+from agent.trace import TraceLogger
 
 BENIGN_PROMPT = """You are a workspace assistant. Complete this harmless task:
 1. List files in the workspace with list_workspace.
@@ -183,6 +184,7 @@ class OllamaBackend:
         self.model = model
         self._checked = False
         self._sent_initial_prompt = False
+        self.last_turn: dict[str, Any] = {}
         self._messages = [
             {
                 "role": "system",
@@ -249,6 +251,10 @@ class OllamaBackend:
         message = body.get("message") or {}
         self._messages.append(message)
         calls = parse_ollama_tool_calls(message)
+        self.last_turn = {
+            "content": message.get("content") or "",
+            "tool_calls": calls,
+        }
         if not calls:
             return None
         return calls[0]
@@ -262,55 +268,72 @@ class AgentHarness:
         audit: AuditLogger,
         backend: ModelBackend,
         sandbox_profile: str = "locked",
+        trace: TraceLogger | None = None,
+        backend_name: str = "",
     ) -> None:
         self.policy = policy
         self.tools = tools
         self.audit = audit
         self.backend = backend
         self.sandbox_profile = sandbox_profile
+        self.trace = trace or TraceLogger()
+        self.backend_name = backend_name
 
-    def step(self, observation: str = "") -> dict[str, Any] | None:
+    def step(self, observation: str = "", index: int = 1) -> dict[str, Any] | None:
         request = self.backend.next_tool(observation)
         if request is None:
             return None
         tool = str(request.get("tool") or "")
         args = dict(request.get("args") or {})
         decision: PolicyDecision = self.policy.decide(tool, args)
+        turn = getattr(self.backend, "last_turn", {}) or {}
         if not decision.allow:
+            outcome = "denied"
+            result: Any = None
             self.audit.record(
                 decision,
                 sandbox=self.sandbox_profile,
                 result="denied",
+                extra={"args": args, "python_code": args.get("code")},
             )
-            return {
-                "tool": tool,
-                "args": args,
-                "decision": decision,
-                "result": None,
-            }
-        try:
-            result = self.tools.execute(tool, args)
-            outcome = "success"
-        except ToolError as exc:
-            result = str(exc)
-            outcome = "error"
-        self.audit.record(
-            decision,
-            sandbox=self.sandbox_profile,
-            result=outcome,
+        else:
+            try:
+                result = self.tools.execute(tool, args)
+                outcome = "success"
+            except ToolError as exc:
+                result = str(exc)
+                outcome = "error"
+            self.audit.record(
+                decision,
+                sandbox=self.sandbox_profile,
+                result=outcome,
+                extra={"args": args, "python_code": args.get("code")},
+            )
+        self.trace.record_step(
+            index=index,
+            observation=observation,
+            tool=tool,
+            args=args,
+            decision=decision,
+            result=result,
+            outcome=outcome,
+            model_text=str(turn.get("content") or ""),
+            model_tool_calls=list(turn.get("tool_calls") or []),
+            backend=self.backend_name or type(self.backend).__name__,
         )
         return {
             "tool": tool,
             "args": args,
             "decision": decision,
             "result": result,
+            "outcome": outcome,
         }
 
     def run(self, max_steps: int = 12) -> list[dict[str, Any]]:
         steps: list[dict[str, Any]] = []
         observation = BENIGN_PROMPT
-        for _ in range(max_steps):
-            step = self.step(observation)
+        for index in range(1, max_steps + 1):
+            step = self.step(observation, index=index)
             if step is None:
                 break
             steps.append(step)
@@ -322,6 +345,7 @@ class AgentHarness:
                 },
                 default=str,
             )
+        self.trace.write()
         return steps
 
 
@@ -332,6 +356,7 @@ def build_harness(
     workspace: Path | None = None,
     sandbox_url: str | None = None,
     audit_path: Path | None = None,
+    trace_dir: Path | None = None,
 ) -> AgentHarness:
     backend_name = backend_name or os.environ.get("AGENT_BACKEND", "scripted")
     sandbox_url = sandbox_url or os.environ.get("SANDBOX_URL")
@@ -361,4 +386,15 @@ def build_harness(
     else:
         backend = ScriptedBackend()
     audit = AuditLogger(audit_path)
-    return AgentHarness(policy, tools, audit, backend, sandbox_profile=profile)
+    if trace_dir is None and audit_path is not None:
+        trace_dir = audit_path.parent
+    trace = TraceLogger(trace_dir)
+    return AgentHarness(
+        policy,
+        tools,
+        audit,
+        backend,
+        sandbox_profile=profile,
+        trace=trace,
+        backend_name=backend_name,
+    )
