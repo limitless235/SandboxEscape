@@ -39,8 +39,21 @@ _PYTHON_DENY_MARKERS = (
     "os.system",
     "os.popen",
     "__import__",
-    "open(",
 )
+
+
+def python_deny_reason(code: str) -> str | None:
+    lowered = code.lower()
+    if "open(" in lowered:
+        return (
+            "open() is not allowed in run_local_python. "
+            "Use read_file first, then inline the values, e.g. "
+            "nums = [1, 2, 3, 4, 5]; result = sum(nums)"
+        )
+    for marker in _PYTHON_DENY_MARKERS:
+        if marker in lowered:
+            return "python snippet uses a disallowed module or call"
+    return None
 
 
 @dataclass(frozen=True)
@@ -161,16 +174,15 @@ class ToolPolicy:
                 )
 
         if tool == "run_local_python":
-            code = str(args.get("code", "")).lower()
-            for marker in _PYTHON_DENY_MARKERS:
-                if marker in code:
-                    return PolicyDecision(
-                        allow=False,
-                        reason="python snippet uses a disallowed module or call",
-                        control="tool-sandbox-policy",
-                        tool=tool,
-                        target=target,
-                    )
+            deny_reason = python_deny_reason(str(args.get("code", "")))
+            if deny_reason:
+                return PolicyDecision(
+                    allow=False,
+                    reason=deny_reason,
+                    control="tool-sandbox-policy",
+                    tool=tool,
+                    target=target,
+                )
 
         if tool == "query_local_sqlite":
             query = str(args.get("query", "")).strip()
