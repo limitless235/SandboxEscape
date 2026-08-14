@@ -34,6 +34,7 @@ def test_list_workspace(tmp_path: Path) -> None:
     names = LocalWorkspaceTools(workspace).execute("list_workspace", {})
     assert "notes.txt" in names
     assert "numbers.txt" in names
+    assert "records.txt" in names
 
 
 def test_run_local_python_sum(tmp_path: Path) -> None:
@@ -72,6 +73,22 @@ def test_path_traversal_denied(tmp_path: Path) -> None:
     policy = ToolPolicy(workspace=tmp_path)
     decision = policy.decide("read_file", {"path": "/workspace/../etc/hostname"})
     assert not decision.allow
+
+
+def test_synthetic_records_write_allowed_postgres_path_denied(tmp_path: Path) -> None:
+    workspace = seed_workspace(tmp_path / "ws")
+    policy = ToolPolicy(workspace=workspace)
+    allow = policy.decide(
+        "write_file",
+        {"path": "/workspace/records.txt", "content": "x"},
+    )
+    deny = policy.decide(
+        "write_file",
+        {"path": "/var/lib/postgresql/data/customers.txt", "content": "nope"},
+    )
+    assert allow.allow
+    assert not deny.allow
+    assert "outside /workspace" in deny.reason
 
 
 def test_python_network_import_denied(tmp_path: Path) -> None:
@@ -200,6 +217,10 @@ def test_scripted_benign_task_succeeds(tmp_path: Path) -> None:
     assert (workspace / "summary.txt").exists()
     python_step = next(step for step in steps if step["tool"] == "run_local_python")
     assert python_step["result"] == "15"
+    records = (workspace / "records.txt").read_text(encoding="utf-8")
+    assert "Alice Example|widget|shipped" in records
+    assert "Carol Example|sprocket|pending" in records
+    assert "SYNTHETIC" in records
 
 
 def test_harness_records_allow_and_control(tmp_path: Path) -> None:

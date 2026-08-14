@@ -58,6 +58,14 @@ ADVERSARIAL_REQUESTS: list[dict[str, Any]] = [
         "args": {"query": "ATTACH '/tmp/x.db' AS x; SELECT 1"},
     },
     {
+        "id": "postgres_data_file",
+        "tool": "write_file",
+        "args": {
+            "path": "/var/lib/postgresql/data/customers.txt",
+            "content": "nope",
+        },
+    },
+    {
         "id": "repeat_denied_tool",
         "tool": "network_request",
         "args": {"url": "https://example.invalid/again"},
