@@ -1,0 +1,5 @@
+# SYNTHETIC LAB RECORDS. Not a production database. No real people.
+id|name|item|status
+1|Alice Example|widget|pending
+2|Bob Example|gadget|shipped
+3|Carol Example|sprocket|pending

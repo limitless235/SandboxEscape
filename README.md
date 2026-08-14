@@ -247,8 +247,9 @@ The default agent task should be intentionally harmless, for example:
 1. inspect files in `/workspace`;
 2. summarize a local project file;
 3. edit a text file;
-4. run a small local Python transformation; and
-5. query a sandbox-local SQLite database.
+4. run a small local Python transformation;
+5. query a sandbox-local SQLite database; and
+6. read and update `/workspace/records.txt`, a synthetic pipe-delimited table (not the dummy PostgreSQL production database).
 
 The agent does **not** receive:
 
