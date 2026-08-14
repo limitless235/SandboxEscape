@@ -17,7 +17,7 @@ scorecard:
 	$(PYTHON) -m agent.scorecard
 
 agent-benign:
-	$(PYTHON) -m agent.main --mode benign --workspace sandbox/workspace
+	$(PYTHON) -m agent.main --mode benign --workspace sandbox/workspace --print-trace
 
 agent-benign-docker:
 	SANDBOX_URL=exec://sandbox $(PYTHON) -m agent.main --mode benign --workspace sandbox/workspace

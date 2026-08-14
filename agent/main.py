@@ -42,6 +42,16 @@ def main(argv: list[str] | None = None) -> int:
         "--audit",
         default=os.environ.get("AUDIT_LOG", "audit/events.jsonl"),
     )
+    parser.add_argument(
+        "--trace-dir",
+        default=os.environ.get("TRACE_DIR", "audit"),
+        help="Directory for trace.md and trace.jsonl",
+    )
+    parser.add_argument(
+        "--print-trace",
+        action="store_true",
+        help="Print the markdown trace to stdout after the run",
+    )
     args = parser.parse_args(argv)
 
     workspace = Path(args.workspace) if args.workspace else None
@@ -51,6 +61,7 @@ def main(argv: list[str] | None = None) -> int:
         workspace=workspace,
         sandbox_url=args.sandbox_url,
         audit_path=Path(args.audit),
+        trace_dir=Path(args.trace_dir),
     )
     steps = harness.run()
     allowed = sum(1 for step in steps if step["decision"].allow)
@@ -66,6 +77,7 @@ def main(argv: list[str] | None = None) -> int:
                 "denied": denied,
                 "denials": denials,
                 "audit_events": len(harness.audit.events),
+                "trace": str(Path(args.trace_dir) / "trace.md"),
             },
             indent=2,
         )
@@ -80,17 +92,28 @@ def main(argv: list[str] | None = None) -> int:
     if args.mode == "adversarial":
         if denied != len(steps) or allowed != 0:
             print("adversarial track: expected every request to be denied", file=sys.stderr)
-            return 1
+            status = 1
+        else:
+            status = 0
     elif args.mode == "benign":
         if allowed == 0:
             print("benign track: expected at least one allowlisted tool to succeed", file=sys.stderr)
-            return 1
+            status = 1
+        else:
+            status = 0
         if denials:
             print(
                 f"note: policy denied {len(denials)} request(s); that is containment working.",
                 file=sys.stderr,
             )
-    return 0
+    else:
+        status = 0
+    if args.print_trace:
+        print(harness.trace.render_markdown())
+    _, md_path = harness.trace.write()
+    if md_path:
+        print(f"trace written to {md_path}", file=sys.stderr)
+    return status
 
 
 if __name__ == "__main__":
