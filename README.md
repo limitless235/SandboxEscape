@@ -39,7 +39,25 @@ After an agent run, read the step-by-step trace (model text, Python/SQL, policy,
 
 ```bash
 cat audit/trace.md
+cat audit/lab-report.md
 ```
+
+### How to read a run
+
+Each run writes three artifacts under `audit/`:
+
+| File | What it is |
+|---|---|
+| `trace.md` | Human trace: planes, ALLOW vs DENY, per-step **What this means**, model text, Python/SQL |
+| `trace.jsonl` | One JSON object per step (for grep/jq) |
+| `events.jsonl` | Compact allow/deny audit; keys that look like secrets are redacted |
+| `lab-report.md` | One-page briefing plus the last `make scorecard` table if present |
+
+**ALLOW** means a *workspace* tool ran (`/workspace` files, sandbox SQLite, inlined Python). It does **not** mean dummy Postgres was reached.
+
+**DENY** is a containment event. The lab succeeded at blocking the request.
+
+The dummy production database is a separate Compose service on `prod_net`. It is not a granted tool. `make scorecard` checks whether the sandbox *could* reach it; the agent trace records what the model *asked* to do. Those are independent controls.
 
 Fault-injection demo (attach sandbox to `prod_net`; isolation tests should fail):
 

@@ -8,6 +8,7 @@ import os
 import sys
 from pathlib import Path
 
+from agent.explain import cli_briefing, lab_report_markdown, monitoring_summary
 from agent.harness import build_harness
 
 
@@ -67,20 +68,49 @@ def main(argv: list[str] | None = None) -> int:
     allowed = sum(1 for step in steps if step["decision"].allow)
     denied = sum(1 for step in steps if not step["decision"].allow)
     denials = denial_records(steps)
+    summary = monitoring_summary(
+        [
+            {
+                "policy": "allow" if step["decision"].allow else "deny",
+                "control": step["decision"].control,
+                "tool": step["tool"],
+            }
+            for step in steps
+        ]
+    )
+    trace_dir = Path(args.trace_dir)
+    artifacts = {
+        "trace": str(trace_dir / "trace.md"),
+        "trace_jsonl": str(trace_dir / "trace.jsonl"),
+        "audit": str(Path(args.audit)),
+        "lab_report": str(trace_dir / "lab-report.md"),
+    }
     print(
         json.dumps(
             {
                 "mode": args.mode,
+                "backend": args.backend,
                 "steps": len(steps),
                 "tools": [step["tool"] for step in steps],
                 "allowed": allowed,
                 "denied": denied,
                 "denials": denials,
                 "audit_events": len(harness.audit.events),
-                "trace": str(Path(args.trace_dir) / "trace.md"),
+                "summary": summary,
+                "artifacts": artifacts,
+                "trace": artifacts["trace"],
             },
             indent=2,
         )
+    )
+    print(
+        cli_briefing(
+            mode=args.mode,
+            backend=args.backend,
+            summary=summary,
+            artifacts=artifacts,
+        ),
+        file=sys.stderr,
     )
     if args.mode == "benign" and args.backend == "ollama" and len(steps) < 4:
         print(
@@ -111,8 +141,23 @@ def main(argv: list[str] | None = None) -> int:
     if args.print_trace:
         print(harness.trace.render_markdown())
     _, md_path = harness.trace.write()
+    scorecard_path = Path("scorecard.md")
+    scorecard_table = scorecard_path.read_text(encoding="utf-8") if scorecard_path.is_file() else None
+    report_path = Path(args.trace_dir) / "lab-report.md"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        lab_report_markdown(
+            mode=args.mode,
+            backend=args.backend,
+            summary=summary,
+            chain=harness.trace.chain_line(),
+            scorecard_table=scorecard_table,
+        ),
+        encoding="utf-8",
+    )
     if md_path:
         print(f"trace written to {md_path}", file=sys.stderr)
+        print(f"lab report written to {report_path}", file=sys.stderr)
     return status
 
 

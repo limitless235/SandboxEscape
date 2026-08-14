@@ -23,7 +23,7 @@ agent-benign-docker:
 	SANDBOX_URL=exec://sandbox $(PYTHON) -m agent.main --mode benign --workspace sandbox/workspace
 
 agent-adversarial:
-	$(PYTHON) -m agent.main --mode adversarial --workspace sandbox/workspace
+	$(PYTHON) -m agent.main --mode adversarial --workspace sandbox/workspace --print-trace
 
 build:
 	$(COMPOSE) build

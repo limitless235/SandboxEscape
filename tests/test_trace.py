@@ -43,6 +43,8 @@ def test_trace_includes_python_and_chain(tmp_path: Path) -> None:
     assert "open('/workspace/numbers.txt')" in markdown
     assert "Chained from `read_file`" in markdown
     assert "I will read notes.txt" in markdown
+    assert "What this means" in markdown
+    assert "How to read this" in markdown
     jsonl_path, md_path = trace.write()
     assert jsonl_path is not None and jsonl_path.is_file()
     assert md_path is not None and "DENIED" in md_path.read_text(encoding="utf-8")
