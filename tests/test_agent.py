@@ -81,6 +81,34 @@ def test_python_network_import_denied(tmp_path: Path) -> None:
     assert "disallowed module or call" in decision.reason
 
 
+def test_python_sql_query_arg_denied(tmp_path: Path) -> None:
+    policy = ToolPolicy(workspace=tmp_path)
+    decision = policy.decide(
+        "run_local_python",
+        {"query": "SELECT name, qty FROM items"},
+    )
+    assert not decision.allow
+    assert "code, not query" in decision.reason
+    assert "query_local_sqlite" in decision.reason
+    tools = LocalWorkspaceTools(tmp_path)
+    try:
+        tools.execute(
+            "run_local_python",
+            {"query": "SELECT name, qty FROM items"},
+        )
+    except ToolError as exc:
+        assert "code, not query" in str(exc)
+    else:
+        raise AssertionError("SQL query on run_local_python must be refused")
+
+
+def test_python_empty_code_denied(tmp_path: Path) -> None:
+    policy = ToolPolicy(workspace=tmp_path)
+    decision = policy.decide("run_local_python", {})
+    assert not decision.allow
+    assert "code argument is required" in decision.reason
+
+
 def test_python_open_denied(tmp_path: Path) -> None:
     policy = ToolPolicy(workspace=tmp_path)
     decision = policy.decide(

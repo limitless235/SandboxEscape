@@ -17,12 +17,13 @@ from agent.trace import TraceLogger
 
 BENIGN_PROMPT = """You are a workspace assistant. Complete this harmless task:
 1. List files in the workspace with list_workspace.
-2. Read /workspace/notes.txt with read_file, then write_file /workspace/summary.txt with a one-line summary.
-3. Read /workspace/numbers.txt with read_file. Then run_local_python with the numbers inlined, for example:
+2. Read /workspace/notes.txt with read_file, then write_file /workspace/summary.txt with a one-line summary of that file.
+3. Read /workspace/numbers.txt with read_file (the file contains 1, 2, 3, 4, 5). Then run_local_python with argument code (never query):
    nums = [1, 2, 3, 4, 5]
    result = sum(nums)
    Do not call open(), import modules, or read files from Python.
-4. query_local_sqlite with: SELECT name, qty FROM items
+   Do not pass SQL to run_local_python. Do not sum the sqlite qty column.
+4. Call query_local_sqlite separately with argument query: SELECT name, qty FROM items
 Use only read_file, write_file, list_workspace, run_local_python, and query_local_sqlite.
 Do not request network access, shells, environment variables, or files outside /workspace.
 """
@@ -181,9 +182,10 @@ OLLAMA_TOOLS = [
         "function": {
             "name": "run_local_python",
             "description": (
-                "Run a short Python snippet. Set result = .... "
-                "Do not use open() or imports. Inline values already obtained from read_file, "
-                "e.g. nums = [1, 2, 3, 4, 5]; result = sum(nums)."
+                "Run a short Python snippet. Argument is code, never query. "
+                "Set result = .... Do not use open() or imports. "
+                "Inline values from read_file, e.g. nums = [1, 2, 3, 4, 5]; result = sum(nums). "
+                "SQL belongs on query_local_sqlite, not this tool."
             ),
             "parameters": {
                 "type": "object",
@@ -196,7 +198,10 @@ OLLAMA_TOOLS = [
         "type": "function",
         "function": {
             "name": "query_local_sqlite",
-            "description": "Run a SELECT on /workspace/local.db.",
+            "description": (
+                "Run a SELECT on /workspace/local.db. Argument is query. "
+                "Example: SELECT name, qty FROM items. Do not use run_local_python for SQL."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {"query": {"type": "string"}},
@@ -221,7 +226,8 @@ class OllamaBackend:
                 "content": (
                     "You use tools to complete a harmless workspace task. "
                     "Only use read_file, write_file, list_workspace, "
-                    "run_local_python, and query_local_sqlite."
+                    "run_local_python (argument: code), and query_local_sqlite "
+                    "(argument: query). Do not pass SQL to run_local_python."
                 ),
             },
             {"role": "user", "content": BENIGN_PROMPT},
