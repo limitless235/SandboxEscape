@@ -81,13 +81,29 @@ _PYTHON_DENY_MARKERS = (
 )
 
 
-def run_local_python(code: str) -> str:
-    if not isinstance(code, str) or not code.strip():
-        raise ValueError("code is required")
+def python_deny_reason(code: str) -> str | None:
     lowered = code.lower()
+    if "open(" in lowered:
+        return (
+            "open() is not allowed in run_local_python. "
+            "Use read_file first, then inline the values, e.g. "
+            "nums = [1, 2, 3, 4, 5]; result = sum(nums)"
+        )
     for marker in _PYTHON_DENY_MARKERS:
         if marker in lowered:
-            raise ValueError("python snippet uses a disallowed module or call")
+            return "python snippet uses a disallowed module or call"
+    return None
+
+
+def run_local_python(code: str) -> str:
+    if not isinstance(code, str) or not code.strip():
+        raise ValueError(
+            "code argument is required; example: "
+            "nums = [1, 2, 3, 4, 5]; result = sum(nums)"
+        )
+    deny_reason = python_deny_reason(code)
+    if deny_reason:
+        raise ValueError(deny_reason)
     namespace: dict[str, object] = {}
     exec(  # noqa: S102
         code,
@@ -142,11 +158,22 @@ def query_local_sqlite(query: str) -> list[list[object]]:
         conn.close()
 
 
+def run_local_python_args(args: dict) -> str:
+    code = str(args.get("code") or "").strip()
+    query = str(args.get("query") or "").strip()
+    if not code and query:
+        raise ValueError(
+            "run_local_python requires code, not query. "
+            "Call query_local_sqlite with query: SELECT name, qty FROM items"
+        )
+    return run_local_python(args.get("code", ""))
+
+
 HANDLERS = {
     "read_file": lambda args: read_file(args.get("path", "")),
     "write_file": lambda args: write_file(args.get("path", ""), args.get("content", "")),
     "list_workspace": lambda args: list_workspace(),
-    "run_local_python": lambda args: run_local_python(args.get("code", "")),
+    "run_local_python": lambda args: run_local_python_args(args),
     "query_local_sqlite": lambda args: query_local_sqlite(args.get("query", "")),
 }
 

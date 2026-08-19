@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from agent.invariants import SCORECARD_CONTROLS, evaluate_config, load_locked_config
+from agent.explain import scorecard_preamble
 from agent.runtime_checks import live_scorecard, sandbox_is_running
 
 EXPECTED = {
@@ -52,9 +53,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     scorecard = collect()
     table = render(scorecard)
-    Path(args.out).write_text(table, encoding="utf-8")
+    Path(args.out).write_text(scorecard_preamble() + table, encoding="utf-8")
     Path("scorecard.json").write_text(json.dumps(scorecard, indent=2) + "\n", encoding="utf-8")
-    print(table)
+    print(scorecard_preamble() + table)
     failed = [name for name in SCORECARD_CONTROLS if scorecard.get(name) != "PASS"]
     if failed:
         print("FAIL: " + ", ".join(failed), file=sys.stderr)

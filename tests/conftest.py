@@ -3,6 +3,8 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+from agent.lab_records import RECORDS_SEED
+
 
 def seed_workspace(workspace: Path) -> Path:
     workspace.mkdir(parents=True, exist_ok=True)
@@ -11,6 +13,7 @@ def seed_workspace(workspace: Path) -> Path:
         encoding="utf-8",
     )
     (workspace / "numbers.txt").write_text("1\n2\n3\n4\n5\n", encoding="utf-8")
+    (workspace / "records.txt").write_text(RECORDS_SEED, encoding="utf-8")
     conn = sqlite3.connect(workspace / "local.db")
     conn.execute(
         "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT NOT NULL, qty INTEGER NOT NULL)"

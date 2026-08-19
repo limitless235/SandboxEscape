@@ -3,7 +3,7 @@ COMPOSE ?= docker compose
 PYTEST ?= $(PYTHON) -m pytest
 
 .PHONY: test test-unit test-isolation scorecard agent-benign agent-adversarial \
-	up down locked-up leaky-up chained-up build
+	demo demo-full compare up down locked-up leaky-up chained-up build
 
 test: test-unit
 
@@ -16,14 +16,23 @@ test-isolation:
 scorecard:
 	$(PYTHON) -m agent.scorecard
 
+compare:
+	$(PYTHON) -m agent.compare --out audit/compare.md
+
+demo:
+	$(PYTHON) -m agent.demo --out-dir audit
+
+demo-full:
+	$(PYTHON) -m agent.demo --live --out-dir audit
+
 agent-benign:
-	$(PYTHON) -m agent.main --mode benign --workspace sandbox/workspace
+	$(PYTHON) -m agent.main --mode benign --workspace sandbox/workspace --print-trace
 
 agent-benign-docker:
 	SANDBOX_URL=exec://sandbox $(PYTHON) -m agent.main --mode benign --workspace sandbox/workspace
 
 agent-adversarial:
-	$(PYTHON) -m agent.main --mode adversarial --workspace sandbox/workspace
+	$(PYTHON) -m agent.main --mode adversarial --workspace sandbox/workspace --print-trace
 
 build:
 	$(COMPOSE) build

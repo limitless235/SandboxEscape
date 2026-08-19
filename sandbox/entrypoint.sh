@@ -5,6 +5,10 @@ if [ ! -f /workspace/notes.txt ]; then
   cp -a /opt/sandbox/workspace-seed/. /workspace/
 fi
 
+if [ ! -f /workspace/records.txt ]; then
+  cp /opt/sandbox/workspace-seed/records.txt /workspace/records.txt
+fi
+
 if [ ! -f /workspace/local.db ]; then
   python3 - <<'PY'
 import sqlite3
