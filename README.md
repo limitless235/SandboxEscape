@@ -34,9 +34,11 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
 
 make test-unit              # policy, audit, adversarial, overlay detectors
-make demo                   # scripted agents + audit/compare.md
+make demo                   # scripted agents + audit/compare.md (copy, not sandbox/workspace)
 cat audit/compare.md        # locked vs leaky vs chained (config-level)
-cat audit/lab-report.md     # last benign run briefing
+cat audit/lab-report.md     # last demo benign briefing
+cat audit/benign/trace.md   # scripted workspace task
+cat audit/adversarial/trace.md
 ```
 
 ### Full isolation (Docker Desktop must be running)
@@ -53,7 +55,8 @@ make agent-adversarial      # disallowed requests must be denied
 After an agent run, read the step-by-step trace (model text, Python/SQL, policy, chain):
 
 ```bash
-cat audit/trace.md
+cat audit/trace.md          # make agent-benign / agent-adversarial
+cat audit/benign/trace.md   # make demo
 cat audit/lab-report.md
 ```
 
@@ -63,10 +66,10 @@ Each run writes three artifacts under `audit/`:
 
 | File | What it is |
 |---|---|
-| `trace.md` | Human trace: planes, ALLOW vs DENY, per-step **What this means**, model text, Python/SQL |
+| `trace.md` | Human trace: planes, ALLOW vs DENY, per-step **What this means**, model text, Python/SQL (`audit/benign/` after `make demo`) |
 | `trace.jsonl` | One JSON object per step (for grep/jq) |
-| `events.jsonl` | Compact allow/deny audit; keys that look like secrets are redacted |
-| `lab-report.md` | One-page briefing plus the last `make scorecard` table if present |
+| `events.jsonl` | Compact allow/deny audit; secret-like keys and `password=` / `token:` values are redacted |
+| `lab-report.md` | One-page briefing plus the last `make scorecard` table if present (`make demo` writes this) |
 | `compare.md` | Locked vs leaky vs chained isolation table (`make demo` / `make compare`) |
 
 **ALLOW** means a *workspace* tool ran (`/workspace` files, sandbox SQLite, inlined Python). It does **not** mean dummy Postgres was reached.

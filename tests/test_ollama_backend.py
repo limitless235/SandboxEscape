@@ -140,7 +140,7 @@ def test_ollama_drains_batched_tool_calls(monkeypatch) -> None:
     assert chat_calls["count"] == 1
 
 
-def test_split_batch_defers_writes_and_python() -> None:
+def test_split_batch_drains_leading_reads_only() -> None:
     from agent.harness import split_batch_tool_calls
 
     calls = [
@@ -152,5 +152,109 @@ def test_split_batch_defers_writes_and_python() -> None:
     ]
     first, pending, deferred = split_batch_tool_calls(calls)
     assert first["tool"] == "list_workspace"
-    assert [item["tool"] for item in pending] == ["read_file", "read_file"]
+    assert [item["tool"] for item in pending] == ["read_file"]
+    assert [item["tool"] for item in deferred] == [
+        "write_file",
+        "run_local_python",
+        "read_file",
+    ]
+    assert deferred[-1]["args"]["path"] == "/workspace/numbers.txt"
+
+
+def test_split_batch_skips_leading_writes_to_first_read() -> None:
+    from agent.harness import split_batch_tool_calls
+
+    calls = [
+        {"tool": "write_file", "args": {"path": "/workspace/summary.txt", "content": "x"}},
+        {"tool": "run_local_python", "args": {"code": "result = 1"}},
+        {"tool": "read_file", "args": {"path": "/workspace/notes.txt"}},
+        {"tool": "read_file", "args": {"path": "/workspace/numbers.txt"}},
+    ]
+    first, pending, deferred = split_batch_tool_calls(calls)
+    assert first["tool"] == "read_file"
+    assert first["args"]["path"] == "/workspace/notes.txt"
+    assert [item["tool"] for item in pending] == ["read_file"]
     assert [item["tool"] for item in deferred] == ["write_file", "run_local_python"]
+
+
+def test_next_tool_does_not_return_batched_extra_write(monkeypatch) -> None:
+    def fake_urlopen(req, timeout=None):
+        url = req if isinstance(req, str) else req.full_url
+        if str(url).endswith("/api/tags"):
+            return _FakeResponse({"models": [{"name": "qwen2.5:3b"}]})
+        return _FakeResponse(
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "planning",
+                    "tool_calls": [
+                        {"function": {"name": "list_workspace", "arguments": {}}},
+                        {
+                            "function": {
+                                "name": "write_file",
+                                "arguments": {
+                                    "path": "/workspace/summary.txt",
+                                    "content": "nope",
+                                },
+                            }
+                        },
+                        {
+                            "function": {
+                                "name": "read_file",
+                                "arguments": {"path": "/workspace/notes.txt"},
+                            }
+                        },
+                    ],
+                }
+            }
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    backend = OllamaBackend("http://127.0.0.1:11434", "qwen2.5:3b")
+    first = backend.next_tool("")
+    assert first == {"tool": "list_workspace", "args": {}}
+    drained = []
+    while backend._pending:
+        drained.append(backend.next_tool("ok"))
+    assert drained == []
+    assert all(item["tool"] != "write_file" for item in [first, *drained])
+    assert [item["tool"] for item in backend._deferred] == ["write_file", "read_file"]
+
+
+def test_next_tool_writes_first_starts_at_read(monkeypatch) -> None:
+    def fake_urlopen(req, timeout=None):
+        url = req if isinstance(req, str) else req.full_url
+        if str(url).endswith("/api/tags"):
+            return _FakeResponse({"models": [{"name": "qwen2.5:3b"}]})
+        return _FakeResponse(
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "function": {
+                                "name": "write_file",
+                                "arguments": {
+                                    "path": "/workspace/summary.txt",
+                                    "content": "nope",
+                                },
+                            }
+                        },
+                        {
+                            "function": {
+                                "name": "read_file",
+                                "arguments": {"path": "/workspace/notes.txt"},
+                            }
+                        },
+                    ],
+                }
+            }
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    backend = OllamaBackend("http://127.0.0.1:11434", "qwen2.5:3b")
+    first = backend.next_tool("")
+    assert first["tool"] == "read_file"
+    assert not backend._pending
+    assert backend._deferred[0]["tool"] == "write_file"

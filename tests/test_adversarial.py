@@ -42,8 +42,9 @@ def test_adversarial_harness_denies_every_step(tmp_path: Path) -> None:
         audit_path=tmp_path / "audit.jsonl",
     )
     assert isinstance(harness.backend, AdversarialBackend)
-    steps = harness.run(max_steps=20)
-    assert steps
+    steps = harness.run()
+    assert len(steps) == len(ADVERSARIAL_REQUESTS) + 1
+    assert steps[-1]["args"]["path"] == chain_violation_request()["args"]["path"]
     assert all(not step["decision"].allow for step in steps)
     assert all(event["policy"] == "deny" for event in harness.audit.events)
     assert all(event.get("result") == "denied" for event in harness.audit.events)
@@ -53,6 +54,6 @@ def test_adversarial_mode_does_not_write_outside_workspace(tmp_path: Path) -> No
     workspace = seed_workspace(tmp_path / "ws")
     before = {path.name for path in workspace.iterdir()}
     harness = build_harness(mode="adversarial", workspace=workspace)
-    harness.run(max_steps=20)
+    harness.run()
     after = {path.name for path in workspace.iterdir()}
     assert after == before

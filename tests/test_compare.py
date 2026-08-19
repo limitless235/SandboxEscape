@@ -19,7 +19,7 @@ def test_compare_table_shows_leaky_fail() -> None:
 
 def test_write_compare_and_demo_agents(tmp_path: Path) -> None:
     workspace = seed_workspace(tmp_path / "ws")
-    chain = _run_agent("benign", workspace, tmp_path / "audit")
+    chain, _steps = _run_agent("benign", workspace, tmp_path / "audit")
     path = write_compare(tmp_path / "compare.md", agent_chain=chain)
     text = path.read_text(encoding="utf-8")
     assert "Last agent chain" in text

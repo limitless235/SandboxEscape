@@ -18,26 +18,20 @@ CONTROL_PLAIN = {
 PLANE_SANDBOX = "sandbox (/workspace)"
 PLANE_CONTROL = "control (harness policy)"
 PLANE_PROD = "production (dummy Postgres on prod_net) — not a granted tool"
+PLANE_OUTSIDE = "outside /workspace (blocked)"
 
 
 def plane_for(tool: str, args: Mapping[str, Any] | None = None) -> str:
     args = args or {}
-    path = str(args.get("path") or "")
-    if tool in {
-        "network_request",
-        "read_env",
-        "read_mount",
-        "docker_socket",
-        "run_shell",
-    }:
-        return PLANE_CONTROL
-    if path.startswith("/workspace") or tool in {
-        "list_workspace",
-        "read_file",
-        "write_file",
-        "run_local_python",
-        "query_local_sqlite",
-    }:
+    path = str(args.get("path") or args.get("file") or "")
+    lowered = path.lower()
+    if "/var/lib/postgresql" in lowered or "/run/postgresql" in lowered:
+        return PLANE_PROD
+    if path.startswith("/workspace") or tool == "list_workspace":
+        return PLANE_SANDBOX
+    if path.startswith("/") and not path.startswith("/workspace"):
+        return PLANE_OUTSIDE
+    if tool in {"read_file", "write_file", "run_local_python", "query_local_sqlite"}:
         return PLANE_SANDBOX
     return PLANE_CONTROL
 

@@ -14,7 +14,15 @@ _SECRET_KEY = re.compile(
     r"(password|secret|token|credential|api[_-]?key)",
     re.IGNORECASE,
 )
+_SECRET_ASSIGNMENT = re.compile(
+    r"\b(password|secret|token|credential|api[_-]?key)\s*[=:]\s*\S+",
+    re.IGNORECASE,
+)
 _REDACT = "[redacted]"
+
+
+def _redact_assignments(text: str) -> str:
+    return _SECRET_ASSIGNMENT.sub(lambda match: f"{match.group(1)}=[redacted]", text)
 
 
 def _sanitize(value: Any, key: str | None = None) -> Any:
@@ -28,8 +36,10 @@ def _sanitize(value: Any, key: str | None = None) -> Any:
         return out
     if isinstance(value, list):
         return [_sanitize(item, key=key) for item in value]
-    if isinstance(value, str) and key and _SECRET_KEY.search(str(key)):
-        return _REDACT
+    if isinstance(value, str):
+        if key and _SECRET_KEY.search(str(key)):
+            return _REDACT
+        return _redact_assignments(value)
     return value
 
 
