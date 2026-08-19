@@ -381,31 +381,22 @@ This lab keeps the word honest:
 Walkthrough that stays inside the charter:
 
 ```bash
-# 1. Locked: isolation should PASS
-docker compose up --build -d
+# 10 minutes, no Docker
+make test-unit
+make demo
+cat audit/compare.md
+
+# Full isolation
+make locked-up
 make test-isolation
 make scorecard
-
-# 2. Benign agent: workspace only
+make demo-full          # leaky overlay, then restore locked
 make agent-benign
 cat audit/trace.md
-cat audit/lab-report.md
-
-# 3. Adversarial: every request DENY
-make agent-adversarial
-
-# 4. One-control fault: sandbox on prod_net → tests FAIL
-make leaky-up
-make test-isolation    # expected FAIL
-make locked-up
-
-# 5. Several controls off at once
-make chained-up
-make scorecard         # expected FAIL on chained path
-make locked-up
+make agent-adversarial  # every request DENY
 ```
 
-If step 4/5 did not fail, the detectors are wrong — that is the bug, not “the model should have exploited it.”
+If leaky/chained scorecards did not FAIL, the detectors are wrong — that is the bug, not “the model should have exploited it.”
 
 ---
 

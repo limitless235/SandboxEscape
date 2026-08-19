@@ -237,3 +237,11 @@ def sandbox_cannot_connect_to(host: str, port: int) -> bool:
     if ip and ip != host and _tcp_reaches(ip, port):
         return False
     return True
+
+
+def sandbox_reaches_prod_db(host: str = "prod-db", port: int = 5432) -> bool:
+    """True if the sandbox process can open TCP to dummy Postgres.
+
+    Isolation tests use this. It is not an agent tool and does not run SQL.
+    """
+    return not sandbox_cannot_connect_to(host, port)
