@@ -12,7 +12,7 @@ from pathlib import Path
 from agent.compare import write_compare
 from agent.explain import lab_report_markdown, monitoring_summary
 from agent.harness import build_harness
-from agent.invariants import FAIL, PASS
+from agent.invariants import FAIL, PASS, SCORECARD_CONTROLS
 from agent.lab_records import RECORDS_SEED
 from agent.main import run_exit_status
 from agent.runtime_checks import (
@@ -103,11 +103,23 @@ def isolation_restored_to_locked() -> bool:
         card = live_scorecard()
     except Exception:
         return False
-    if card.get("container_running") != PASS:
-        return False
-    if card.get("prod_net absent") != PASS:
+    if not locked_scorecard_passes(card):
         return False
     return sandbox_prod_db_tcp_status() == PROBE_UNREACHABLE
+
+
+def locked_scorecard_passes(card: dict[str, str]) -> bool:
+    return card.get("container_running") == PASS and all(
+        card.get(control) == PASS for control in SCORECARD_CONTROLS
+    )
+
+
+def leaky_scorecard_matches(card: dict[str, str]) -> bool:
+    expected_failures = {"prod_net absent", "DB TCP unreachable"}
+    return card.get("container_running") == PASS and all(
+        card.get(control) == (FAIL if control in expected_failures else PASS)
+        for control in SCORECARD_CONTROLS
+    )
 
 
 def prepare_isolated_workspace(src: Path, dest: Path) -> Path:
@@ -237,8 +249,8 @@ def main(argv: list[str] | None = None) -> int:
         _write_scorecard(out_dir / "scorecard-locked.md", locked)
         print("locked live scorecard:")
         print(render(locked))
-        if locked.get("prod_net absent") != PASS or locked.get("container_running") != PASS:
-            print("locked baseline did not verify (prod_net or container_running)", file=sys.stderr)
+        if not locked_scorecard_passes(locked):
+            print("locked baseline has failing isolation controls", file=sys.stderr)
             return 1
 
         print("applying leaky overlay (sandbox on prod_net)…")
@@ -263,8 +275,8 @@ def main(argv: list[str] | None = None) -> int:
         _write_scorecard(out_dir / "scorecard-leaky.md", leaky)
         print("leaky live scorecard (expect FAIL on prod_net / DB TCP):")
         print(render(leaky))
-        if leaky.get("prod_net absent") != FAIL:
-            print("leaky overlay did not attach prod_net", file=sys.stderr)
+        if not leaky_scorecard_matches(leaky):
+            print("leaky overlay did not produce the expected two-control failure", file=sys.stderr)
             status = 1
 
         print("restoring locked profile…")

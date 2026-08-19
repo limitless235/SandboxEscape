@@ -9,6 +9,7 @@ from agent.runtime_checks import (
     PROBE_REACHED,
     PROBE_UNREACHABLE,
     _tcp_probe,
+    _tcp_status,
     compose_services_healthy,
 )
 
@@ -61,3 +62,14 @@ def test_compose_services_healthy_requires_health(monkeypatch) -> None:
 
     monkeypatch.setattr("agent.runtime_checks.subprocess.run", fake_run_ok)
     assert compose_services_healthy("sandbox", "prod-db") is True
+
+
+def test_tcp_status_does_not_hide_failed_direct_ip_probe(monkeypatch) -> None:
+    statuses = iter([PROBE_UNREACHABLE, PROBE_FAILED])
+    monkeypatch.setattr(
+        "agent.runtime_checks._tcp_probe", lambda _host, _port: next(statuses)
+    )
+    monkeypatch.setattr(
+        "agent.runtime_checks._service_ip", lambda _service: "172.20.0.2"
+    )
+    assert _tcp_status("prod-db", 5432) == PROBE_FAILED
