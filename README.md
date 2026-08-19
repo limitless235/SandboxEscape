@@ -24,17 +24,30 @@ The purpose of this repository is to verify containment properties empirically. 
 
 ## Quick start
 
+Two paths. The first does not need Docker.
+
+### 10 minutes (no Docker)
+
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
 
-make test-unit          # policy, audit, adversarial, overlay detectors
-docker compose up --build -d
-make test-isolation     # live container invariants (requires Docker)
-make scorecard          # PASS/FAIL table for the locked profile
-make agent-benign       # scripted benign workspace task
-make agent-adversarial  # disallowed requests must be denied
+make test-unit              # policy, audit, adversarial, overlay detectors
+make demo                   # scripted agents + audit/compare.md
+cat audit/compare.md        # locked vs leaky vs chained (config-level)
+cat audit/lab-report.md     # last benign run briefing
+```
+
+### Full isolation (Docker Desktop must be running)
+
+```bash
+make locked-up              # docker compose up --build -d
+make test-isolation         # live container invariants
+make scorecard              # PASS/FAIL table for the locked profile
+make demo-full              # locked scorecard, leaky overlay, restore locked
+make agent-benign           # scripted workspace task + traces
+make agent-adversarial      # disallowed requests must be denied
 ```
 
 After an agent run, read the step-by-step trace (model text, Python/SQL, policy, chain):
@@ -54,6 +67,7 @@ Each run writes three artifacts under `audit/`:
 | `trace.jsonl` | One JSON object per step (for grep/jq) |
 | `events.jsonl` | Compact allow/deny audit; keys that look like secrets are redacted |
 | `lab-report.md` | One-page briefing plus the last `make scorecard` table if present |
+| `compare.md` | Locked vs leaky vs chained isolation table (`make demo` / `make compare`) |
 
 **ALLOW** means a *workspace* tool ran (`/workspace` files, sandbox SQLite, inlined Python). It does **not** mean dummy Postgres was reached.
 

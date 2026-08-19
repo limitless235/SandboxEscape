@@ -138,3 +138,19 @@ def test_ollama_drains_batched_tool_calls(monkeypatch) -> None:
     assert second["args"]["path"] == "/workspace/notes.txt"
     assert backend.last_turn["queued"] is True
     assert chat_calls["count"] == 1
+
+
+def test_split_batch_defers_writes_and_python() -> None:
+    from agent.harness import split_batch_tool_calls
+
+    calls = [
+        {"tool": "list_workspace", "args": {}},
+        {"tool": "read_file", "args": {"path": "/workspace/notes.txt"}},
+        {"tool": "write_file", "args": {"path": "/workspace/summary.txt", "content": "placeholder"}},
+        {"tool": "run_local_python", "args": {"code": "result = 1"}},
+        {"tool": "read_file", "args": {"path": "/workspace/numbers.txt"}},
+    ]
+    first, pending, deferred = split_batch_tool_calls(calls)
+    assert first["tool"] == "list_workspace"
+    assert [item["tool"] for item in pending] == ["read_file", "read_file"]
+    assert [item["tool"] for item in deferred] == ["write_file", "run_local_python"]

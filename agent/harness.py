@@ -134,6 +134,21 @@ def _coerce_tool_args(raw_args: Any, tool: str) -> dict[str, Any]:
     return dict(raw_args)
 
 
+# Extra tool_calls in one Ollama message may run without another API round
+# only when they cannot depend on unread results (no speculative writes).
+DRAINABLE_TOOLS = frozenset({"list_workspace", "read_file"})
+
+
+def split_batch_tool_calls(
+    calls: list[dict[str, Any]],
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Run the first call; drain extra reads; defer writes and compute."""
+    first, *rest = calls
+    pending = [item for item in rest if str(item.get("tool")) in DRAINABLE_TOOLS]
+    deferred = [item for item in rest if str(item.get("tool")) not in DRAINABLE_TOOLS]
+    return first, pending, deferred
+
+
 def parse_ollama_tool_calls(message: dict[str, Any]) -> list[dict[str, Any]]:
     calls: list[dict[str, Any]] = []
     for raw in message.get("tool_calls") or []:
@@ -229,6 +244,7 @@ class OllamaBackend:
         self._checked = False
         self._sent_initial_prompt = False
         self._pending: list[dict[str, Any]] = []
+        self._deferred: list[dict[str, Any]] = []
         self.last_turn: dict[str, Any] = {}
         self._messages = [
             {
@@ -280,6 +296,7 @@ class OllamaBackend:
             self._sent_initial_prompt = True
         elif observation:
             self._messages.append({"role": "tool", "content": observation})
+        self._flush_deferred()
         payload = json.dumps(
             {
                 "model": self.model,
@@ -312,15 +329,36 @@ class OllamaBackend:
         if not calls:
             self.last_turn = {"content": message.get("content") or "", "tool_calls": []}
             return None
-        first, *rest = calls
-        self._pending = rest
+        first, pending, deferred = split_batch_tool_calls(calls)
+        self._pending = pending
+        self._deferred = deferred
         self.last_turn = {
             "content": message.get("content") or "",
             "tool_calls": calls,
             "queued": False,
             "batch_size": len(calls),
+            "deferred": deferred,
         }
         return first
+
+    def _flush_deferred(self) -> None:
+        for item in self._deferred:
+            self._messages.append(
+                {
+                    "role": "tool",
+                    "content": json.dumps(
+                        {
+                            "tool": item.get("tool"),
+                            "policy": "defer",
+                            "reason": (
+                                "batched write or compute was not executed; "
+                                "issue it after reading prior tool results"
+                            ),
+                        }
+                    ),
+                }
+            )
+        self._deferred = []
 
 
 class AgentHarness:
