@@ -11,10 +11,20 @@ from agent.demo import (
     main,
     prepare_isolated_workspace,
 )
-from agent.invariants import FAIL, PASS
+from agent.invariants import FAIL, PASS, SCORECARD_CONTROLS
 from agent.lab_records import RECORDS_AFTER_ALICE_SHIPPED, RECORDS_SEED
 from agent.runtime_checks import PROBE_FAILED, PROBE_REACHED, PROBE_UNREACHABLE
 from tests.conftest import seed_workspace
+
+
+def _card(*, leaky: bool = False, **overrides: str) -> dict[str, str]:
+    card = {control: PASS for control in SCORECARD_CONTROLS}
+    card["container_running"] = PASS
+    if leaky:
+        card["prod_net absent"] = FAIL
+        card["DB TCP unreachable"] = FAIL
+    card.update(overrides)
+    return card
 
 
 def test_prepare_isolated_workspace_resets_records(tmp_path: Path) -> None:
@@ -55,7 +65,7 @@ def test_isolation_restored_to_locked_checks_health_and_probe(monkeypatch) -> No
     monkeypatch.setattr("agent.demo.compose_services_healthy", lambda *_names: True)
     monkeypatch.setattr(
         "agent.demo.live_scorecard",
-        lambda: {"prod_net absent": FAIL, "container_running": PASS},
+        lambda: _card(**{"prod_net absent": FAIL}),
     )
     monkeypatch.setattr(
         "agent.demo.sandbox_prod_db_tcp_status", lambda: PROBE_UNREACHABLE
@@ -64,7 +74,7 @@ def test_isolation_restored_to_locked_checks_health_and_probe(monkeypatch) -> No
 
     monkeypatch.setattr(
         "agent.demo.live_scorecard",
-        lambda: {"prod_net absent": PASS, "container_running": PASS},
+        lambda: _card(),
     )
     monkeypatch.setattr("agent.demo.sandbox_prod_db_tcp_status", lambda: PROBE_REACHED)
     assert isolation_restored_to_locked() is False
@@ -81,13 +91,13 @@ def test_isolation_restored_to_locked_checks_health_and_probe(monkeypatch) -> No
     monkeypatch.setattr("agent.demo.compose_services_healthy", lambda *_names: True)
     monkeypatch.setattr(
         "agent.demo.live_scorecard",
-        lambda: {"prod_net absent": PASS, "container_running": FAIL},
+        lambda: _card(container_running=FAIL),
     )
     assert isolation_restored_to_locked() is False
 
     monkeypatch.setattr(
         "agent.demo.live_scorecard",
-        lambda: {"prod_net absent": PASS, "container_running": PASS},
+        lambda: _card(),
     )
     monkeypatch.setattr(
         "agent.demo.sandbox_prod_db_tcp_status", lambda: PROBE_UNREACHABLE
@@ -135,8 +145,8 @@ def test_demo_live_restore_failure_does_not_claim_restored(
     src = seed_workspace(tmp_path / "ws")
     cards = iter(
         [
-            {"prod_net absent": PASS, "container_running": PASS},
-            {"prod_net absent": FAIL, "container_running": PASS},
+            _card(),
+            _card(leaky=True),
         ]
     )
     monkeypatch.setattr("agent.demo.shutil.which", lambda _name: "/usr/bin/docker")
@@ -159,8 +169,8 @@ def test_demo_live_recreates_locked_when_already_running(
     ups: list[tuple] = []
     cards = iter(
         [
-            {"prod_net absent": PASS, "container_running": PASS},
-            {"prod_net absent": FAIL, "container_running": PASS},
+            _card(),
+            _card(leaky=True),
         ]
     )
 
@@ -185,8 +195,8 @@ def test_demo_live_fails_when_leaky_still_missing_prod_net(
     src = seed_workspace(tmp_path / "ws")
     cards = iter(
         [
-            {"prod_net absent": PASS, "container_running": PASS},
-            {"prod_net absent": PASS, "container_running": PASS},
+            _card(),
+            _card(),
         ]
     )
     monkeypatch.setattr("agent.demo.shutil.which", lambda _name: "/usr/bin/docker")
@@ -195,5 +205,21 @@ def test_demo_live_fails_when_leaky_still_missing_prod_net(
     monkeypatch.setattr("agent.demo.render", lambda _card: "table\n")
     monkeypatch.setattr("agent.demo._compose_up", lambda *_files, **_kw: 0)
     monkeypatch.setattr("agent.demo.isolation_restored_to_locked", lambda: True)
+    rc = main(["--live", "--workspace", str(src), "--out-dir", str(tmp_path / "audit")])
+    assert rc == 1
+
+
+def test_demo_live_fails_when_locked_control_is_down(
+    tmp_path: Path, monkeypatch
+) -> None:
+    src = seed_workspace(tmp_path / "ws")
+    monkeypatch.setattr("agent.demo.shutil.which", lambda _name: "/usr/bin/docker")
+    monkeypatch.setattr("agent.demo.sandbox_is_running", lambda: True)
+    monkeypatch.setattr(
+        "agent.demo.live_scorecard",
+        lambda: _card(**{"Read-only root FS": FAIL}),
+    )
+    monkeypatch.setattr("agent.demo.render", lambda _card: "table\n")
+    monkeypatch.setattr("agent.demo._compose_up", lambda *_files, **_kw: 0)
     rc = main(["--live", "--workspace", str(src), "--out-dir", str(tmp_path / "audit")])
     assert rc == 1

@@ -189,8 +189,9 @@ def _tcp_status(host: str, port: int) -> str:
         ip_status = _tcp_probe(ip, port)
         if ip_status == PROBE_REACHED:
             return PROBE_REACHED
-        if ip_status != PROBE_FAILED:
-            return ip_status
+        # Once a service IP is available, both probes must conclusively report
+        # unreachable. A failed direct-IP exec is not evidence of isolation.
+        return ip_status
     return status
 
 
