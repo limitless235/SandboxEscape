@@ -56,4 +56,4 @@ Break one control with `compose.leaky.yaml` / `compose.faults/*`, or several wit
 
 No replay of OpenAI/Hugging Face or Kimi incidents. No package-proxy, SSRF, RCE, or exploit recipes. No helper whose job is an escape hatch. No real credentials or production data.
 
-Deeper architecture and incident-*class* mapping: [docs/LAB_EXPLAINED.md](docs/LAB_EXPLAINED.md).
+Narrative write-up: [docs/writeup.md](docs/writeup.md). Architecture and incident-*class* mapping: [docs/LAB_EXPLAINED.md](docs/LAB_EXPLAINED.md).

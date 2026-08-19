@@ -452,6 +452,7 @@ If leaky/chained scorecards did not FAIL, the detectors are wrong — that is th
 
 ## 11. Further reading
 
+- Narrative write-up of the incidents and this lab: [writeup.md](writeup.md).
 - This repo: [README.md](../README.md) (charter, threat model, scorecard).
 - OpenAI public incident note: [Hugging Face model evaluation security incident](https://openai.com/index/hugging-face-model-evaluation-security-incident/).
 - Container baseline ideas (general, not an exploit guide): non-root, read-only rootfs, dropped capabilities, no docker.sock, network policies, no host mounts.
