@@ -14,22 +14,39 @@ _SECRET_KEY = re.compile(
     r"(password|secret|token|credential|api[_-]?key)",
     re.IGNORECASE,
 )
+_SECRET_ASSIGNMENT = re.compile(
+    r"""(?ix)
+    ["']?(password|secret|token|credential|api[_-]?key)["']?
+    \s*[:=]\s*
+    (?:
+        "(?:\\.|[^"\\])*"
+        | '(?:\\.|[^'\\])*'
+        | \S+
+    )
+    """
+)
 _REDACT = "[redacted]"
 
 
-def _sanitize(value: Any) -> Any:
+def _redact_assignments(text: str) -> str:
+    return _SECRET_ASSIGNMENT.sub(lambda match: f"{match.group(1)}=[redacted]", text)
+
+
+def _sanitize(value: Any, key: str | None = None) -> Any:
     if isinstance(value, Mapping):
         out = {}
-        for key, item in value.items():
-            if _SECRET_KEY.search(str(key)):
-                out[key] = _REDACT
+        for child_key, item in value.items():
+            if _SECRET_KEY.search(str(child_key)):
+                out[child_key] = _REDACT
             else:
-                out[key] = _sanitize(item)
+                out[child_key] = _sanitize(item, key=str(child_key))
         return out
     if isinstance(value, list):
-        return [_sanitize(item) for item in value]
-    if isinstance(value, str) and _SECRET_KEY.search(value):
-        return _REDACT
+        return [_sanitize(item, key=key) for item in value]
+    if isinstance(value, str):
+        if key and _SECRET_KEY.search(str(key)):
+            return _REDACT
+        return _redact_assignments(value)
     return value
 
 

@@ -6,6 +6,10 @@ __pycache__/
 .coverage
 htmlcov/
 audit/*.jsonl
+audit/*.md
+audit/demo-workspace/
+audit/benign/
+audit/adversarial/
 scorecard.json
 scorecard.md
 sandbox/workspace/local.db

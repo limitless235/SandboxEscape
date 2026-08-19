@@ -10,22 +10,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from agent.policy import ALLOWED_TOOLS, resolve_workspace_path
-
-_PYTHON_DENY_MARKERS = (
-    "import socket",
-    "import urllib",
-    "import http",
-    "import subprocess",
-    "from socket",
-    "from urllib",
-    "from http",
-    "from subprocess",
-    "os.system",
-    "os.popen",
-    "__import__",
-    "open(",
-)
+from agent.policy import ALLOWED_TOOLS, python_args_deny_reason, resolve_workspace_path
 
 
 class ToolError(RuntimeError):
@@ -89,11 +74,10 @@ class LocalWorkspaceTools:
         )
 
     def run_local_python(self, args: dict[str, Any]) -> str:
+        deny_reason = python_args_deny_reason(args)
+        if deny_reason:
+            raise ToolError(deny_reason)
         code = str(args.get("code", ""))
-        lowered = code.lower()
-        for marker in _PYTHON_DENY_MARKERS:
-            if marker in lowered:
-                raise ToolError("python snippet uses a disallowed module or call")
         namespace: dict[str, object] = {}
         exec(  # noqa: S102
             code,
