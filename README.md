@@ -47,7 +47,7 @@ cat audit/adversarial/trace.md
 make locked-up              # docker compose up --build -d
 make test-isolation         # live container invariants
 make scorecard              # PASS/FAIL table for the locked profile
-make demo-full              # locked scorecard, leaky overlay, restore locked
+make demo-full              # force locked baseline, leaky FAIL, verified restore
 make agent-benign           # scripted workspace task + traces
 make agent-adversarial      # disallowed requests must be denied
 ```
@@ -62,13 +62,13 @@ cat audit/lab-report.md
 
 ### How to read a run
 
-Each run writes three artifacts under `audit/`:
+Each run writes these artifacts under `audit/`:
 
 | File | What it is |
 |---|---|
 | `trace.md` | Human trace: planes, ALLOW vs DENY, per-step **What this means**, model text, Python/SQL (`audit/benign/` after `make demo`) |
 | `trace.jsonl` | One JSON object per step (for grep/jq) |
-| `events.jsonl` | Compact allow/deny audit; secret-like keys and `password=` / `token:` values are redacted |
+| `events.jsonl` | Compact allow/deny audit; secret-like keys and assignment values (`password=…`, quoted/JSON `"password": "…"`) are redacted; “no secrets” prose is kept |
 | `lab-report.md` | One-page briefing plus the last `make scorecard` table if present (`make demo` writes this) |
 | `compare.md` | Locked vs leaky vs chained isolation table (`make demo` / `make compare`) |
 
@@ -76,7 +76,9 @@ Each run writes three artifacts under `audit/`:
 
 **DENY** is a containment event. The lab succeeded at blocking the request.
 
-The dummy production database is a separate Compose service on `prod_net`. It is not a granted tool. `make scorecard` checks whether the sandbox *could* reach it; the agent trace records what the model *asked* to do. Those are independent controls.
+The dummy production database is a separate Compose service on `prod_net`. It is not a granted tool. `make scorecard` / `make demo-full` check whether the sandbox *could* reach it; the agent trace records what the model *asked* to do. Those are independent controls. A failed probe (`docker compose exec` did not run) is not treated as “DB unreachable.”
+
+`make demo` copies the workspace to `audit/demo-workspace` and fails if any **scripted** step is denied. `make agent-benign` still runs against `sandbox/workspace` (it may edit tracked `records.txt`). Benign Ollama runs may mix ALLOW and DENY; that is containment, not a failed walkthrough. Extra Ollama `tool_calls` in one message only auto-run a leading list/read prefix; writes are deferred until a later turn.
 
 Fault-injection demo (attach sandbox to `prod_net`; isolation tests should fail):
 
@@ -601,7 +603,7 @@ The lesson is not that a model can be made perfectly obedient.
 
 The lesson is that **containment must remain effective when the model is not obedient**.
 
-A longer mapping of public eval-sandbox incident *classes* (OpenAI/Hugging Face evaluation isolation; Kimi-style egress misconfiguration) onto this repo’s planes, Compose overlays, and traces is in [docs/LAB_EXPLAINED.md](docs/LAB_EXPLAINED.md). That document does not reconstruct attack chains.
+A longer mapping of public eval-sandbox incident *classes* (OpenAI/Hugging Face evaluation isolation; Kimi-style egress misconfiguration) onto this repo’s planes, Compose overlays, traces, `make demo` / `make demo-full`, and Ollama batch rules is in [docs/LAB_EXPLAINED.md](docs/LAB_EXPLAINED.md). That document does not reconstruct attack chains.
 
 ---
 
