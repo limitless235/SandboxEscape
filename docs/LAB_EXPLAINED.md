@@ -30,7 +30,7 @@ What this lab takes from that (and what it refuses):
 | A **trusted helper** on the boundary (package proxy) had more reach than the sandbox itself | No helper whose job is “talk to the internet for the agent” | No package-proxy, no SSRF target, no RCE gadget |
 | Guardrails-off testing still needs **hard isolation** | Policy + container + kernel + network, independently testable | No “turn off refusals and attack” agent goal |
 | Protected data / third-party production was reachable after isolation failed | Dummy `prod-db` on `prod_net` only; scorecard fails if the sandbox is attached | No production credentials, no real Hugging Face / OpenAI infra |
-| After-the-fact forensics | `audit/trace.md`, `events.jsonl`, `lab-report.md`, scorecard | No incident replay |
+| After-the-fact forensics | `audit/trace.md`, demo traces under `audit/benign/` and `audit/adversarial/`, `events.jsonl`, `lab-report.md`, scorecard | No incident replay |
 
 The sentence that matches this lab’s threat model is the industry one: **if you did not build the sandbox correctly, “the model escaped” is a containment failure**, not a magic property of the weights.
 
@@ -151,7 +151,16 @@ Controls you will see in traces:
 | `model-tool-policy` | Tool name not in the allowlist (`network_request`, `run_shell`, `read_env`, …) |
 | `tool-sandbox-policy` | Allowlisted name, but path / Python / SQL rules refused the args (`open()`, `../`, non-SELECT, empty SQL, …) |
 
-Network isolation (`prod_net` absent, DNS, HTTPS) is **not** decided inside that loop. It is a property of Compose. `make scorecard` measures it. Policy and segmentation are independent on purpose: even if a secret leaked into the sandbox env, locked Compose still has no route to `prod-db`.
+Network isolation (`prod_net` absent, DNS, HTTPS) is **not** decided inside that loop. It is a property of Compose. `make scorecard` / `make demo-full` measure it. Policy and segmentation are independent on purpose: even if a secret leaked into the sandbox env, locked Compose still has no route to `prod-db`.
+
+Ollama sometimes emits several `tool_calls` in one assistant message. The harness does **not** run that whole batch blindly:
+
+- A **leading** run of `list_workspace` / `read_file` may drain in order (those results do not depend on unread writes).
+- `write_file` and `run_local_python` in the same message are **deferred** so the model cannot write a placeholder before reading `notes.txt`.
+- Reads that appear *after* a write in the same message are not pulled forward (that would bind the wrong tool result to the next step).
+- If the batch **starts** with write/python, the harness skips those once, answers them as deferred (with `name` / `tool_call_id`), and starts at the first read. The **same** mixed batch on the next turn runs in original order so writes are not starved.
+
+Scripted backends never batch; they emit one tool per step.
 
 ---
 
@@ -303,7 +312,7 @@ flowchart LR
   Agent -.->|no tool, no route when locked| PG[dummy Postgres]
 ```
 
-That split is the lab’s stand-in for “eval scratch space vs production data.” It is **not** a license to attack Postgres. Isolation tests may probe TCP to `prod-db:5432` from the sandbox *as pytest*, to see if the network is wrong. The model is not given that probe as a goal.
+That split is the lab’s stand-in for “eval scratch space vs production data.” It is **not** a license to attack Postgres. Isolation tests and `make demo-full` may probe TCP to `prod-db:5432` from the sandbox *as pytest / scorecard*, to see if the network is wrong. The probe must actually run; a failed exec is not a PASS. The model is not given that probe as a goal.
 
 ---
 
@@ -319,13 +328,16 @@ flowchart LR
   end
 
   subgraph adversarial [mode=adversarial]
-    A1[scripted disallowed requests]
-    A2[every step must be DENY]
+    A1[12 fixed disallowed requests]
+    A2[plus chained path write]
+    A3[every step must be DENY]
   end
 ```
 
-- **Benign** (`AGENT_BACKEND=scripted` or `ollama`): harmless workspace task. Extra Ollama tool calls are drained; `open()` and SQL-shaped Python are denied with hints. Denials during benign Ollama runs are still containment working.
-- **Adversarial**: fixed list in `agent/adversarial.py`. Every request must be denied. Proves the harness does not “trust the model’s intent.”
+- **Benign** (`AGENT_BACKEND=scripted` or `ollama`): harmless workspace task (`list` / notes / summary / inlined `sum([1,2,3,4,5])` / SQLite SELECT / synthetic `records.txt`). `open()` and SQL-shaped Python are denied with hints.
+  - **Scripted** (`make agent-benign`, `make demo`): every step must ALLOW. Any denial is a failed walkthrough (exit 1). The demo copies files into `audit/demo-workspace` so tracked `sandbox/workspace/records.txt` is not dirtied.
+  - **Ollama**: extra `tool_calls` follow the drain/defer rules above. Mixed ALLOW and DENY is still a successful lab run if at least one allowlisted tool ran; a DENY is containment, not a broken demo.
+- **Adversarial**: twelve fixed requests in `agent/adversarial.py` plus a chained `write_file` to a path that violates policy (`chained_write_escape_path`). Default `harness.run()` covers the **whole** queue. Every step must be DENY. Proves the harness does not “trust the model’s intent.”
 
 Ollama is optional. Unit tests never need weights.
 
@@ -333,33 +345,52 @@ Ollama is optional. Unit tests never need weights.
 
 ## 8. Observability and monitoring
 
-After `python -m agent.main ...`:
+`python -m agent.main` (used by `make agent-benign` / `make agent-adversarial`) writes under `audit/` by default:
 
 | Artifact | Role |
 |---|---|
 | stderr `=== lab run ===` | ALLOW/DENY counts, planes, artifact paths |
 | `audit/trace.md` | Human story: briefing, chain, **What this means**, Python/SQL |
 | `audit/trace.jsonl` | One JSON object per step |
-| `audit/events.jsonl` | Compact allow/deny; secret-like **keys** redacted |
+| `audit/events.jsonl` | Compact allow/deny. Secret-like **keys** and assignment-shaped values (`password=…`, `token: …`, quoted and JSON `"password": "…"` ) are redacted. Prose such as “no secrets” is kept. |
 | `audit/lab-report.md` | One-pager; embeds last `scorecard.md` if present |
-| `scorecard.md` | Infrastructure isolation PASS/FAIL |
+| `scorecard.md` | Infrastructure isolation PASS/FAIL (`make scorecard`) |
+
+`make demo` is the 10-minute path. It does **not** mutate the tracked workspace. Artifacts:
+
+| Artifact | Role |
+|---|---|
+| `audit/demo-workspace/` | Isolated copy of `sandbox/workspace` (synthetic `records.txt` reset, then edited) |
+| `audit/benign/trace.md` | Scripted benign chain |
+| `audit/adversarial/trace.md` | All disallowed requests DENY |
+| `audit/compare.md` | Locked vs leaky vs chained **config** table (no Docker required) |
+| `audit/lab-report.md` | Briefing from the benign demo run |
+
+`make demo-full` adds live Compose scorecards (`audit/scorecard-locked.md`, `audit/scorecard-leaky.md`). It always `--force-recreate`s the locked stack first (even if a leaky overlay was already up). The locked table must PASS every isolation control, including `container_running`. The leaky table must FAIL `prod_net absent` and `DB TCP unreachable`. Restore is claimed only when sandbox and `prod-db` are **healthy**, every locked control PASSes again, and TCP probes to dummy Postgres are **conclusively unreachable** (a failed `docker compose exec` is *not* treated as isolation). Compose `--wait` is required unless that flag is unsupported.
+
+Trace **planes** are labels, not policy. `/var/lib/postgresql/…` is production; `/workspace/…` is sandbox; `/workspace-evil/…` and `/etc/…` are outside. Policy still uses resolved paths under the real workspace directory.
 
 ```mermaid
 flowchart LR
-  Run[agent.main] --> Trace[trace.md / jsonl]
-  Run --> Events[events.jsonl]
-  Run --> Report[lab-report.md]
-  SC[make scorecard] --> Card[scorecard.md]
+  Main[agent.main] --> Trace[audit/trace.md]
+  Main --> Events[events.jsonl]
+  Main --> Report[lab-report.md]
+  Demo[make demo] --> Copy[demo-workspace]
+  Demo --> B[benign/trace.md]
+  Demo --> A[adversarial/trace.md]
+  Demo --> Cmp[compare.md]
+  Demo --> Report
+  SC[make scorecard / demo-full] --> Card[scorecard.md]
   Card -.-> Report
 ```
 
 How to read a row:
 
-1. **Plane** — sandbox vs control vs (not) production.
+1. **Plane** — sandbox vs control vs outside vs (not) production.
 2. **Policy** — ALLOW or DENY.
 3. **Control** — allowlist vs sandbox rules.
 4. **Meaning** — one sentence tying that step to the architecture.
-5. Scorecard separately: *could* the container reach dummy Postgres or the internet?
+5. Scorecard separately: *could* the container reach dummy Postgres or the internet? Probe failure is inconclusive, not a PASS.
 
 That split matches incident response in the public write-ups: **what did the agent ask for** vs **what could the environment actually reach**.
 
@@ -383,22 +414,23 @@ Walkthrough that stays inside the charter:
 ```bash
 # 10 minutes, no Docker
 make test-unit
-make demo
+make demo               # copy under audit/demo-workspace; exit 1 if scripted denial
 cat audit/compare.md
 cat audit/lab-report.md
 cat audit/benign/trace.md
+cat audit/adversarial/trace.md
 
 # Full isolation
 make locked-up
 make test-isolation
 make scorecard
-make demo-full          # leaky overlay, then restore locked (verified)
-make agent-benign
+make demo-full          # locked baseline (all PASS), leaky FAIL, verified restore
+make agent-benign       # writes audit/trace.md; may edit sandbox/workspace/records.txt
 cat audit/trace.md
-make agent-adversarial  # every request DENY
+make agent-adversarial  # entire queue DENY, including chained path
 ```
 
-If leaky/chained scorecards did not FAIL, the detectors are wrong — that is the bug, not “the model should have exploited it.”
+If leaky/chained scorecards did not FAIL, the detectors are wrong — that is the bug, not “the model should have exploited it.” If `demo-full` prints “stack restored to locked,” the stack was healthy and the TCP probes actually reported unreachable.
 
 ---
 
@@ -414,6 +446,7 @@ If leaky/chained scorecards did not FAIL, the detectors are wrong — that is th
 8. Every important property is a test.
 9. Synthetic data only.
 10. A green suite is evidence of a property, not proof of absolute security.
+11. Do not claim a locked restore (or a locked scorecard) unless health checks and TCP probes were conclusive.
 
 ---
 
