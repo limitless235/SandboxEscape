@@ -25,11 +25,15 @@ def plane_for(tool: str, args: Mapping[str, Any] | None = None) -> str:
     args = args or {}
     path = str(args.get("path") or args.get("file") or "")
     lowered = path.lower()
-    if "/var/lib/postgresql" in lowered or "/run/postgresql" in lowered:
+
+    def under(root: str) -> bool:
+        return lowered == root or lowered.startswith(root + "/")
+
+    if under("/var/lib/postgresql") or under("/run/postgresql"):
         return PLANE_PROD
-    if path.startswith("/workspace") or tool == "list_workspace":
+    if path == "/workspace" or path.startswith("/workspace/") or tool == "list_workspace":
         return PLANE_SANDBOX
-    if path.startswith("/") and not path.startswith("/workspace"):
+    if path.startswith("/") and not (path == "/workspace" or path.startswith("/workspace/")):
         return PLANE_OUTSIDE
     if tool in {"read_file", "write_file", "run_local_python", "query_local_sqlite"}:
         return PLANE_SANDBOX

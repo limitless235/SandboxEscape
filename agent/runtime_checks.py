@@ -108,19 +108,94 @@ def _service_ip(service: str) -> str | None:
     return None
 
 
-def _tcp_reaches(host: str, port: int) -> bool:
+PROBE_REACHED = "reached"
+PROBE_UNREACHABLE = "unreachable"
+PROBE_FAILED = "probe_failed"
+
+
+def compose_services_healthy(*service_names: str) -> bool:
+    if not service_names:
+        return False
+    try:
+        result = subprocess.run(
+            [*COMPOSE, "ps", "--format", "json"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+    if result.returncode != 0:
+        return False
+    found: dict[str, dict[str, str]] = {}
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        name = str(row.get("Service") or row.get("Name") or "")
+        found[name] = {
+            "health": str(row.get("Health") or "").lower(),
+            "state": str(row.get("State") or row.get("Status") or "").lower(),
+        }
+    for name in service_names:
+        info = found.get(name)
+        if not info:
+            return False
+        health = info["health"]
+        state = info["state"]
+        if health:
+            if health != "healthy":
+                return False
+        elif "running" not in state:
+            return False
+    return True
+
+
+def _tcp_probe(host: str, port: int) -> str:
     script = (
         "import socket,sys\n"
         f"s=socket.socket(); s.settimeout(2)\n"
         "try:\n"
         f"    s.connect(({host!r},{port}))\n"
-        "    sys.exit(0)\n"
+        "    print('PROBE_REACHED')\n"
         "except Exception:\n"
-        "    sys.exit(1)\n"
+        "    print('PROBE_UNREACHABLE')\n"
         "finally:\n"
         "    s.close()\n"
     )
-    return _exec(script).returncode == 0
+    try:
+        result = _exec(script)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return PROBE_FAILED
+    stdout = result.stdout or ""
+    if "PROBE_REACHED" in stdout:
+        return PROBE_REACHED
+    if "PROBE_UNREACHABLE" in stdout:
+        return PROBE_UNREACHABLE
+    return PROBE_FAILED
+
+
+def _tcp_status(host: str, port: int) -> str:
+    status = _tcp_probe(host, port)
+    if status == PROBE_REACHED:
+        return PROBE_REACHED
+    ip = _service_ip(host)
+    if ip and ip != host:
+        ip_status = _tcp_probe(ip, port)
+        if ip_status == PROBE_REACHED:
+            return PROBE_REACHED
+        if ip_status != PROBE_FAILED:
+            return ip_status
+    return status
+
+
+def _tcp_reaches(host: str, port: int) -> bool:
+    return _tcp_status(host, port) == PROBE_REACHED
 
 
 def _dns_resolves(name: str) -> bool:
@@ -197,10 +272,10 @@ def live_scorecard() -> dict[str, str]:
         "sys.exit(0 if p.read_text()=='ok' else 1)\n"
     ).returncode == 0
 
-    db_tcp_probe = sandbox_cannot_connect_to("prod-db", 5432)
-    # Sharing prod_net is a structural path to the DB. The TCP probe is
-    # best-effort and may time out on hosts with broken bridge networking.
-    db_tcp = (not prod_net) and db_tcp_probe
+    db_status = sandbox_prod_db_tcp_status()
+    # Sharing prod_net is a structural path to the DB. Probe-exec failure is
+    # not evidence of isolation.
+    db_tcp = (not prod_net) and db_status == PROBE_UNREACHABLE
     https = not _tcp_reaches("1.1.1.1", 443)
     dns = not _dns_resolves("example.invalid")
     dns_open = not dns
@@ -230,13 +305,12 @@ def live_scorecard() -> dict[str, str]:
 
 
 def sandbox_cannot_connect_to(host: str, port: int) -> bool:
-    if _tcp_reaches(host, port):
-        return False
-    # DNS may be independently disabled; still probe the service IP.
-    ip = _service_ip(host)
-    if ip and ip != host and _tcp_reaches(ip, port):
-        return False
-    return True
+    return _tcp_status(host, port) == PROBE_UNREACHABLE
+
+
+def sandbox_prod_db_tcp_status(host: str = "prod-db", port: int = 5432) -> str:
+    """reached / unreachable / probe_failed. Isolation tests; not an agent tool."""
+    return _tcp_status(host, port)
 
 
 def sandbox_reaches_prod_db(host: str = "prod-db", port: int = 5432) -> bool:
@@ -244,4 +318,4 @@ def sandbox_reaches_prod_db(host: str = "prod-db", port: int = 5432) -> bool:
 
     Isolation tests use this. It is not an agent tool and does not run SQL.
     """
-    return not sandbox_cannot_connect_to(host, port)
+    return sandbox_prod_db_tcp_status(host, port) == PROBE_REACHED

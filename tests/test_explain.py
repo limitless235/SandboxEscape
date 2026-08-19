@@ -79,4 +79,5 @@ def test_plane_for_postgres_path_is_prod() -> None:
     )
     assert plane_for("read_file", {"path": "/etc/hostname"}) == PLANE_OUTSIDE
     assert plane_for("read_file", {"path": "/workspace/notes.txt"}) == PLANE_SANDBOX
+    assert plane_for("read_file", {"path": "/workspace-evil/secret"}) == PLANE_OUTSIDE
     assert plane_for("list_workspace", {}) == PLANE_SANDBOX
