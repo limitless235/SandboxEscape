@@ -385,12 +385,14 @@ Walkthrough that stays inside the charter:
 make test-unit
 make demo
 cat audit/compare.md
+cat audit/lab-report.md
+cat audit/benign/trace.md
 
 # Full isolation
 make locked-up
 make test-isolation
 make scorecard
-make demo-full          # leaky overlay, then restore locked
+make demo-full          # leaky overlay, then restore locked (verified)
 make agent-benign
 cat audit/trace.md
 make agent-adversarial  # every request DENY

@@ -142,11 +142,37 @@ DRAINABLE_TOOLS = frozenset({"list_workspace", "read_file"})
 def split_batch_tool_calls(
     calls: list[dict[str, Any]],
 ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
-    """Run the first call; drain extra reads; defer writes and compute."""
-    first, *rest = calls
-    pending = [item for item in rest if str(item.get("tool")) in DRAINABLE_TOOLS]
-    deferred = [item for item in rest if str(item.get("tool")) not in DRAINABLE_TOOLS]
-    return first, pending, deferred
+    """Drain a leading run of list/read, in order. Defer writes and later tools.
+
+    Extra reads after a write are not pulled forward (that would mis-bind
+    tool results). A batch that starts with write/python skips those and
+    starts at the first read if one exists.
+    """
+    if not calls:
+        raise ValueError("no tool calls")
+
+    def drainable(item: dict[str, Any]) -> bool:
+        return str(item.get("tool")) in DRAINABLE_TOOLS
+
+    index = 0
+    while index < len(calls) and drainable(calls[index]):
+        index += 1
+    if index > 0:
+        return calls[0], list(calls[1:index]), list(calls[index:])
+
+    later = 1
+    while later < len(calls) and not drainable(calls[later]):
+        later += 1
+    if later < len(calls):
+        end = later + 1
+        while end < len(calls) and drainable(calls[end]):
+            end += 1
+        return (
+            calls[later],
+            list(calls[later + 1 : end]),
+            list(calls[:later]) + list(calls[end:]),
+        )
+    return calls[0], [], list(calls[1:])
 
 
 def parse_ollama_tool_calls(message: dict[str, Any]) -> list[dict[str, Any]]:
@@ -430,7 +456,13 @@ class AgentHarness:
             "outcome": outcome,
         }
 
-    def run(self, max_steps: int = 12) -> list[dict[str, Any]]:
+    def run(self, max_steps: int | None = None) -> list[dict[str, Any]]:
+        if max_steps is None:
+            queue = getattr(self.backend, "_queue", None)
+            if isinstance(queue, list) and queue:
+                max_steps = max(16, len(queue))
+            else:
+                max_steps = 16
         steps: list[dict[str, Any]] = []
         observation = BENIGN_PROMPT
         for index in range(1, max_steps + 1):

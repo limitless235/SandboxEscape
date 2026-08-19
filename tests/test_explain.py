@@ -65,3 +65,18 @@ def test_trace_markdown_explains_planes(tmp_path) -> None:
     assert summary["allowed"] == 1
     assert summary["denied"] == 0
     assert "control" in run_briefing_markdown().lower()
+
+
+def test_plane_for_postgres_path_is_prod() -> None:
+    from agent.explain import PLANE_OUTSIDE, PLANE_PROD, PLANE_SANDBOX, plane_for
+
+    assert (
+        plane_for(
+            "write_file",
+            {"path": "/var/lib/postgresql/data/customers.txt"},
+        )
+        == PLANE_PROD
+    )
+    assert plane_for("read_file", {"path": "/etc/hostname"}) == PLANE_OUTSIDE
+    assert plane_for("read_file", {"path": "/workspace/notes.txt"}) == PLANE_SANDBOX
+    assert plane_for("list_workspace", {}) == PLANE_SANDBOX
