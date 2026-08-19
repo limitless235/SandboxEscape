@@ -225,6 +225,26 @@ def test_audit_redacts_assignment_values_not_prose(tmp_path: Path) -> None:
     assert "token=[redacted]" in event["args"]["content"]
 
 
+def test_audit_redacts_quoted_and_json_assignments(tmp_path: Path) -> None:
+    policy = ToolPolicy(workspace=tmp_path)
+    audit = AuditLogger(tmp_path / "events.jsonl")
+    decision = policy.decide("write_file", {"path": "/workspace/notes.txt", "content": "x"})
+    event = audit.record(
+        decision,
+        extra={
+            "quoted": 'password="open sesame" api_key=\'abc def\'',
+            "jsonish": '{"password": "hidden-value", "ok": true}',
+        },
+    )
+    dumped = (tmp_path / "events.jsonl").read_text(encoding="utf-8")
+    assert "open sesame" not in dumped
+    assert "hidden-value" not in dumped
+    assert "abc def" not in dumped
+    assert "password=[redacted]" in event["quoted"]
+    assert "api_key=[redacted]" in event["quoted"]
+    assert "password=[redacted]" in event["jsonish"]
+
+
 def test_scripted_benign_task_succeeds(tmp_path: Path) -> None:
     workspace = seed_workspace(tmp_path / "ws")
     harness = build_harness(

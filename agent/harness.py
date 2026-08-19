@@ -7,7 +7,7 @@ import os
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, NamedTuple, Protocol
 
 from agent.adversarial import ADVERSARIAL_REQUESTS, chain_violation_request
 from agent.audit import AuditLogger
@@ -139,14 +139,33 @@ def _coerce_tool_args(raw_args: Any, tool: str) -> dict[str, Any]:
 DRAINABLE_TOOLS = frozenset({"list_workspace", "read_file"})
 
 
+class BatchSplit(NamedTuple):
+    first: dict[str, Any]
+    pending: list[dict[str, Any]]
+    leading_deferred: list[dict[str, Any]]
+    trailing_deferred: list[dict[str, Any]]
+    skipped_leading_writes: bool
+
+
+def _batch_fingerprint(calls: list[dict[str, Any]]) -> str:
+    return json.dumps(
+        [{"tool": item.get("tool"), "args": item.get("args")} for item in calls],
+        sort_keys=True,
+        default=str,
+    )
+
+
 def split_batch_tool_calls(
     calls: list[dict[str, Any]],
-) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+    *,
+    skip_leading_writes: bool = True,
+) -> BatchSplit:
     """Drain a leading run of list/read, in order. Defer writes and later tools.
 
     Extra reads after a write are not pulled forward (that would mis-bind
     tool results). A batch that starts with write/python skips those and
-    starts at the first read if one exists.
+    starts at the first read if one exists — unless that exact batch was
+    already skipped once, in which case calls run in original order.
     """
     if not calls:
         raise ValueError("no tool calls")
@@ -154,11 +173,14 @@ def split_batch_tool_calls(
     def drainable(item: dict[str, Any]) -> bool:
         return str(item.get("tool")) in DRAINABLE_TOOLS
 
+    if not skip_leading_writes:
+        return BatchSplit(calls[0], list(calls[1:]), [], [], False)
+
     index = 0
     while index < len(calls) and drainable(calls[index]):
         index += 1
     if index > 0:
-        return calls[0], list(calls[1:index]), list(calls[index:])
+        return BatchSplit(calls[0], list(calls[1:index]), [], list(calls[index:]), False)
 
     later = 1
     while later < len(calls) and not drainable(calls[later]):
@@ -167,12 +189,14 @@ def split_batch_tool_calls(
         end = later + 1
         while end < len(calls) and drainable(calls[end]):
             end += 1
-        return (
+        return BatchSplit(
             calls[later],
             list(calls[later + 1 : end]),
-            list(calls[:later]) + list(calls[end:]),
+            list(calls[:later]),
+            list(calls[end:]),
+            True,
         )
-    return calls[0], [], list(calls[1:])
+    return BatchSplit(calls[0], [], [], list(calls[1:]), False)
 
 
 def parse_ollama_tool_calls(message: dict[str, Any]) -> list[dict[str, Any]]:
@@ -188,7 +212,11 @@ def parse_ollama_tool_calls(message: dict[str, Any]) -> list[dict[str, Any]]:
             or {}
         )
         if name:
-            calls.append({"tool": name, "args": _coerce_tool_args(args, str(name))})
+            entry = {"tool": name, "args": _coerce_tool_args(args, str(name))}
+            call_id = raw.get("id") or function.get("id")
+            if call_id:
+                entry["id"] = str(call_id)
+            calls.append(entry)
     return calls
 
 
@@ -271,6 +299,8 @@ class OllamaBackend:
         self._sent_initial_prompt = False
         self._pending: list[dict[str, Any]] = []
         self._deferred: list[dict[str, Any]] = []
+        self._last_call: dict[str, Any] | None = None
+        self._skipped_batch: str | None = None
         self.last_turn: dict[str, Any] = {}
         self._messages = [
             {
@@ -304,13 +334,31 @@ class OllamaBackend:
             )
         self._checked = True
 
+    def _tool_message(self, content: str, call: dict[str, Any] | None = None) -> dict[str, Any]:
+        message: dict[str, Any] = {"role": "tool", "content": content}
+        if not call:
+            return message
+        name = str(call.get("tool") or "")
+        if name:
+            message["name"] = name
+            message["tool_name"] = name
+        call_id = call.get("id")
+        if call_id:
+            message["tool_call_id"] = str(call_id)
+        return message
+
+    def _append_observation(self, observation: str) -> None:
+        if not observation:
+            return
+        self._messages.append(self._tool_message(observation, self._last_call))
+
     def next_tool(self, observation: str) -> dict[str, Any] | None:
         self._ensure_model()
         if self._pending:
-            if observation:
-                self._messages.append({"role": "tool", "content": observation})
+            self._append_observation(observation)
             nxt = self._pending.pop(0)
             remaining = len(self._pending)
+            self._last_call = nxt
             self.last_turn = {
                 "content": "",
                 "tool_calls": [nxt],
@@ -320,8 +368,8 @@ class OllamaBackend:
             return nxt
         if not self._sent_initial_prompt:
             self._sent_initial_prompt = True
-        elif observation:
-            self._messages.append({"role": "tool", "content": observation})
+        else:
+            self._append_observation(observation)
         self._flush_deferred()
         payload = json.dumps(
             {
@@ -353,26 +401,31 @@ class OllamaBackend:
         self._messages.append(message)
         calls = parse_ollama_tool_calls(message)
         if not calls:
+            self._last_call = None
             self.last_turn = {"content": message.get("content") or "", "tool_calls": []}
             return None
-        first, pending, deferred = split_batch_tool_calls(calls)
-        self._pending = pending
-        self._deferred = deferred
+        fingerprint = _batch_fingerprint(calls)
+        skip_writes = fingerprint != self._skipped_batch
+        split = split_batch_tool_calls(calls, skip_leading_writes=skip_writes)
+        self._skipped_batch = fingerprint if split.skipped_leading_writes else None
+        self._flush_items(split.leading_deferred)
+        self._pending = split.pending
+        self._deferred = split.trailing_deferred
+        self._last_call = split.first
         self.last_turn = {
             "content": message.get("content") or "",
             "tool_calls": calls,
             "queued": False,
             "batch_size": len(calls),
-            "deferred": deferred,
+            "deferred": list(split.leading_deferred) + list(split.trailing_deferred),
         }
-        return first
+        return split.first
 
-    def _flush_deferred(self) -> None:
-        for item in self._deferred:
+    def _flush_items(self, items: list[dict[str, Any]]) -> None:
+        for item in items:
             self._messages.append(
-                {
-                    "role": "tool",
-                    "content": json.dumps(
+                self._tool_message(
+                    json.dumps(
                         {
                             "tool": item.get("tool"),
                             "policy": "defer",
@@ -382,8 +435,12 @@ class OllamaBackend:
                             ),
                         }
                     ),
-                }
+                    item,
+                )
             )
+
+    def _flush_deferred(self) -> None:
+        self._flush_items(self._deferred)
         self._deferred = []
 
 

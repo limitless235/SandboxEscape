@@ -15,8 +15,15 @@ _SECRET_KEY = re.compile(
     re.IGNORECASE,
 )
 _SECRET_ASSIGNMENT = re.compile(
-    r"\b(password|secret|token|credential|api[_-]?key)\s*[=:]\s*\S+",
-    re.IGNORECASE,
+    r"""(?ix)
+    ["']?(password|secret|token|credential|api[_-]?key)["']?
+    \s*[:=]\s*
+    (?:
+        "(?:\\.|[^"\\])*"
+        | '(?:\\.|[^'\\])*'
+        | \S+
+    )
+    """
 )
 _REDACT = "[redacted]"
 

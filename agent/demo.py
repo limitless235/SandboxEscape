@@ -12,13 +12,15 @@ from pathlib import Path
 from agent.compare import write_compare
 from agent.explain import lab_report_markdown, monitoring_summary
 from agent.harness import build_harness
-from agent.invariants import PASS
+from agent.invariants import FAIL, PASS
 from agent.lab_records import RECORDS_SEED
 from agent.main import run_exit_status
 from agent.runtime_checks import (
+    PROBE_UNREACHABLE,
+    compose_services_healthy,
     live_scorecard,
     sandbox_is_running,
-    sandbox_reaches_prod_db,
+    sandbox_prod_db_tcp_status,
 )
 from agent.scorecard import collect, render, scorecard_preamble
 
@@ -38,8 +40,38 @@ def _run_agent(mode: str, workspace: Path, trace_dir: Path) -> tuple[str, list]:
     return chain, steps
 
 
-def _compose(*args: str) -> int:
-    return subprocess.run(["docker", "compose", *args], cwd=REPO, check=False).returncode
+def _compose(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["docker", "compose", *args],
+        cwd=REPO,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _wait_flag_unsupported(text: str) -> bool:
+    lower = text.lower()
+    if "unknown flag" in lower or "unknown shorthand flag" in lower:
+        return True
+    return "--wait" in lower and ("undefined" in lower or "not a valid" in lower)
+
+
+def _paths_overlap(left: Path, right: Path) -> bool:
+    left = left.resolve()
+    right = right.resolve()
+    if left == right:
+        return True
+    try:
+        left.relative_to(right)
+        return True
+    except ValueError:
+        pass
+    try:
+        right.relative_to(left)
+        return True
+    except ValueError:
+        return False
 
 
 def _compose_up(*compose_files: str, force_recreate: bool = False) -> int:
@@ -48,35 +80,46 @@ def _compose_up(*compose_files: str, force_recreate: bool = False) -> int:
         flags.extend(["-f", name])
     extra = ["--force-recreate"] if force_recreate else []
     waited = _compose(*flags, "up", "-d", *extra, "--wait", "--wait-timeout", "120")
-    if waited == 0:
+    if waited.returncode == 0:
         return 0
+    err = f"{waited.stderr or ''}{waited.stdout or ''}"
+    if not _wait_flag_unsupported(err):
+        return waited.returncode or 1
     fallback = _compose(*flags, "up", "-d", *extra)
-    if fallback != 0:
-        return fallback
+    if fallback.returncode != 0:
+        return fallback.returncode
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
-        if sandbox_is_running():
+        if compose_services_healthy("sandbox", "prod-db"):
             return 0
         time.sleep(2)
     return 1
 
 
 def isolation_restored_to_locked() -> bool:
+    if not compose_services_healthy("sandbox", "prod-db"):
+        return False
     try:
         card = live_scorecard()
     except Exception:
         return False
+    if card.get("container_running") != PASS:
+        return False
     if card.get("prod_net absent") != PASS:
         return False
-    try:
-        if sandbox_reaches_prod_db():
-            return False
-    except Exception:
-        return False
-    return True
+    return sandbox_prod_db_tcp_status() == PROBE_UNREACHABLE
 
 
 def prepare_isolated_workspace(src: Path, dest: Path) -> Path:
+    src = src.expanduser().resolve()
+    dest = dest.expanduser().resolve()
+    if not src.is_dir():
+        raise ValueError(f"workspace source is not a directory: {src}")
+    if _paths_overlap(src, dest):
+        raise ValueError(
+            "demo workspace destination must not overlap the source "
+            f"({src} vs {dest})"
+        )
     if dest.exists():
         shutil.rmtree(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -95,6 +138,16 @@ def _step_status(mode: str, steps: list) -> int:
         denied=denied,
         steps=len(steps),
     )
+
+
+def _write_scorecard(path: Path, scorecard: dict[str, str]) -> None:
+    path.write_text(scorecard_preamble() + render(scorecard), encoding="utf-8")
+
+
+def _restore_locked() -> bool:
+    if _compose_up("compose.yaml", force_recreate=True) != 0:
+        return False
+    return isolation_restored_to_locked()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -171,55 +224,68 @@ def main(argv: list[str] | None = None) -> int:
         print("  make locked-up && make test-isolation && make scorecard && make demo-full")
         return status
 
-    if live or args.live:
-        if not live:
-            print("starting locked stack…")
-            if _compose_up("compose.yaml", force_recreate=True) != 0:
-                print("compose up failed", file=sys.stderr)
-                return 1
-        scorecard = collect()
-        (out_dir / "scorecard-locked.md").write_text(
-            scorecard_preamble() + render(scorecard), encoding="utf-8"
-        )
-        print("locked live scorecard:")
-        print(render(scorecard))
-    else:
-        print("sandbox container not running. Start it with: make locked-up")
-        print("Then: make test-isolation && make scorecard")
-
     if args.live:
+        print("starting locked stack…")
+        if _compose_up("compose.yaml", force_recreate=True) != 0:
+            print("compose up failed", file=sys.stderr)
+            return 1
+        try:
+            locked = live_scorecard()
+        except Exception as exc:
+            print(f"locked live scorecard failed: {exc}", file=sys.stderr)
+            return 1
+        _write_scorecard(out_dir / "scorecard-locked.md", locked)
+        print("locked live scorecard:")
+        print(render(locked))
+        if locked.get("prod_net absent") != PASS or locked.get("container_running") != PASS:
+            print("locked baseline did not verify (prod_net or container_running)", file=sys.stderr)
+            return 1
+
         print("applying leaky overlay (sandbox on prod_net)…")
         if _compose_up("compose.yaml", "compose.leaky.yaml") != 0:
             print("leaky overlay failed", file=sys.stderr)
             print("attempting locked restore…", file=sys.stderr)
-            restored = _compose_up("compose.yaml", force_recreate=True) == 0
-            if restored and isolation_restored_to_locked():
+            if _restore_locked():
                 print("stack restored to locked.")
             else:
                 print("locked restore did not verify", file=sys.stderr)
             return 1
         try:
-            leaky = collect()
-            (out_dir / "scorecard-leaky.md").write_text(
-                scorecard_preamble() + render(leaky), encoding="utf-8"
-            )
-            print("leaky live scorecard (expect FAIL on prod_net / DB TCP):")
-            print(render(leaky))
+            leaky = live_scorecard()
         except Exception as exc:
             print(f"leaky scorecard failed: {exc}", file=sys.stderr)
-            status = 1
-        print("restoring locked profile…")
-        if _compose_up("compose.yaml", force_recreate=True) != 0:
-            print("compose restore failed", file=sys.stderr)
+            print("attempting locked restore…", file=sys.stderr)
+            if _restore_locked():
+                print("stack restored to locked.")
+            else:
+                print("locked restore did not verify", file=sys.stderr)
             return 1
-        if not isolation_restored_to_locked():
+        _write_scorecard(out_dir / "scorecard-leaky.md", leaky)
+        print("leaky live scorecard (expect FAIL on prod_net / DB TCP):")
+        print(render(leaky))
+        if leaky.get("prod_net absent") != FAIL:
+            print("leaky overlay did not attach prod_net", file=sys.stderr)
+            status = 1
+
+        print("restoring locked profile…")
+        if not _restore_locked():
             print(
                 "locked restore verification failed "
-                "(prod_net still present or dummy Postgres TCP reachable)",
+                "(unhealthy stack, prod_net still present, or TCP probe did not confirm isolation)",
                 file=sys.stderr,
             )
             return 1
         print("stack restored to locked.")
+        return status
+
+    if live:
+        scorecard = collect()
+        _write_scorecard(out_dir / "scorecard-locked.md", scorecard)
+        print("locked live scorecard:")
+        print(render(scorecard))
+    else:
+        print("sandbox container not running. Start it with: make locked-up")
+        print("Then: make test-isolation && make scorecard")
     return status
 
 
