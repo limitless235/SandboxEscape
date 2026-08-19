@@ -73,3 +73,9 @@ def test_tcp_status_does_not_hide_failed_direct_ip_probe(monkeypatch) -> None:
         "agent.runtime_checks._service_ip", lambda _service: "172.20.0.2"
     )
     assert _tcp_status("prod-db", 5432) == PROBE_FAILED
+
+    statuses = iter([PROBE_FAILED, PROBE_UNREACHABLE])
+    monkeypatch.setattr(
+        "agent.runtime_checks._tcp_probe", lambda _host, _port: next(statuses)
+    )
+    assert _tcp_status("prod-db", 5432) == PROBE_FAILED
